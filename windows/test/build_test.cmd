@@ -6,3 +6,5 @@ set /p VS=<"%TEMP%\godoican_vs.txt"
 call "%VS%\VC\Auxiliary\Build\vcvars64.bat" >nul
 if not exist ..\obj\test mkdir ..\obj\test
 cl /nologo /std:c++17 /EHsc /O2 /utf-8 /DUNICODE /D_UNICODE /I..\common decodetest.cpp ..\app\Decoder.cpp /Fo..\obj\test\ /Fe..\bin\decodetest.exe /link mfplat.lib mfuuid.lib wmcodecdspuuid.lib ole32.lib oleaut32.lib
+cl /nologo /std:c++17 /EHsc /O2 /utf-8 /DUNICODE /D_UNICODE camprobe.cpp /Fo..\obj\test\ /Fe..\bin\camprobe.exe /link mfplat.lib mf.lib mfreadwrite.lib mfuuid.lib ole32.lib
+cl /nologo /std:c++17 /EHsc /O2 /utf-8 /DUNICODE /D_UNICODE /D_CRT_SECURE_NO_WARNINGS /DNOMINMAX atraso.cpp /Fo..\obj\test\ /Fe..\bin\atraso.exe /link mfplat.lib mf.lib mfreadwrite.lib mfuuid.lib ole32.lib user32.lib gdi32.lib shell32.lib

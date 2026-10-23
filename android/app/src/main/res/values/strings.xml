@@ -26,6 +26,8 @@
     <string name="stabilization">Estabilização digital (aumenta o atraso)</string>
     <string name="low_light">Priorizar pouca luz (o FPS pode cair)</string>
     <string name="auto_focus">Voltar ao foco automático</string>
+    <string name="section_diagnostics">Diagnóstico</string>
+    <string name="share_report">Compartilhar relatório do aparelho</string>
     <string name="forget_pcs">Esquecer todos os PCs</string>
     <string name="tips">Toque na imagem para focar. Toque duas vezes para voltar ao foco automático. Use dois dedos para zoom.</string>
     <string name="curtain_hint">Toque duas vezes para voltar</string>

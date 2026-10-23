@@ -1,6 +1,7 @@
 package com.godoi.godoican
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CaptureRequest
@@ -27,6 +28,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.isVisible
 import com.godoi.godoican.media.CameraCaps
+import com.godoi.godoican.media.DeviceReport
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.materialswitch.MaterialSwitch
 
@@ -360,6 +362,18 @@ class MainActivity : AppCompatActivity() {
         findViewById<MaterialButton>(R.id.btnAutoFocus).setOnClickListener {
             StreamService.instance?.updateControls { it.copy(focusPoint = null) }
             showToast("Foco automático")
+        }
+        findViewById<MaterialButton>(R.id.btnReport).setOnClickListener {
+            showToast("Gerando relatório…")
+            Thread {
+                val text = DeviceReport.build(this)
+                runOnUiThread {
+                    val send = Intent(Intent.ACTION_SEND).setType("text/plain")
+                        .putExtra(Intent.EXTRA_SUBJECT, "GodoiCan — relatório do aparelho")
+                        .putExtra(Intent.EXTRA_TEXT, text)
+                    startActivity(Intent.createChooser(send, getString(R.string.share_report)))
+                }
+            }.start()
         }
         findViewById<MaterialButton>(R.id.btnForget).setOnClickListener {
             StreamService.instance?.forgetPairs()

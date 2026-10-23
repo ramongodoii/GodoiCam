@@ -7,11 +7,13 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.graphics.SurfaceTexture
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.net.wifi.WifiManager
+import android.os.BatteryManager
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
@@ -26,6 +28,7 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.godoi.godoican.media.CameraCaps
 import com.godoi.godoican.media.CameraController
+import com.godoi.godoican.media.DeviceReport
 import com.godoi.godoican.media.GlRenderer
 import com.godoi.godoican.media.VideoEncoder
 import com.godoi.godoican.net.ClientSession
@@ -350,7 +353,7 @@ class StreamService : Service(), StreamServer.Callbacks, ClientSession.Listener,
         val w = settings.width
         val h = settings.height
         val fps = settings.fps
-        val enc = VideoEncoder(w, h, fps, targetBitrate) { s.offerVideo(it) }
+        val enc = VideoEncoder(w, h, fps, targetBitrate, ::nowUs) { s.offerVideo(it) }
         try {
             enc.start()
         } catch (e: Exception) {
@@ -380,6 +383,7 @@ class StreamService : Service(), StreamServer.Callbacks, ClientSession.Listener,
             session.listener = this
             session.clock = ::nowUs
             startEncoder(session)
+            Thread { session.sendReport(DeviceReport.build(this)) }.start()
             Hub.update { it.copy(pcName = session.pcName, message = null) }
             updateNotification()
         }
@@ -418,17 +422,27 @@ class StreamService : Service(), StreamServer.Callbacks, ClientSession.Listener,
             val encFps = r.encodedFrames.getAndSet(0)
             val s = session
             val e = encoder
+            val temp = batteryTenthsC()
+            val thermal = if (Build.VERSION.SDK_INT >= 29) getSystemService(PowerManager::class.java).currentThermalStatus else 0
+            val tempText = if (temp != Int.MIN_VALUE) " • ${"%.1f".format(temp / 10.0)} °C" else ""
             val stats = if (s != null && e != null) {
-                val kbps = s.bytesSent.getAndSet(0) * 8 / 1000
+                val bits = s.bytesSent.getAndSet(0) * 8
                 val dropped = s.framesDropped.getAndSet(0)
+                val encDelay = e.takeEncodeDelayMs()
+                s.sendStats(
+                    Writer().u16(camFps).u16(encFps).u32(bits.toInt()).u32(e.bitrate).u16(dropped.toInt())
+                        .u16(s.queuedFrames()).u16(encDelay.coerceIn(-1, 30000) and 0xffff)
+                        .u16(temp.coerceIn(-32768, 32767) and 0xffff).u8(thermal).build(),
+                )
                 // Recupera o bitrate aos poucos depois de 4 s sem congestionamento.
                 if (e.bitrate < targetBitrate && SystemClock.elapsedRealtime() - lastCongestion > 4000) {
                     e.setBitrate(min(targetBitrate, e.bitrate * 115 / 100))
                 }
-                "Enviando $encFps fps • ${"%.1f".format(kbps / 1000.0)} Mbps" +
+                "Enviando $encFps fps • ${"%.1f".format(bits / 1e6)} Mbps" +
+                    (if (encDelay >= 0) " • codificação $encDelay ms" else "") + tempText +
                     if (dropped > 0) " • $dropped quadros descartados" else ""
             } else {
-                "Câmera $camFps fps"
+                "Câmera $camFps fps$tempText"
             }
             val refreshAddresses = statsTicks++ % 5 == 0
             Hub.update { st ->
@@ -470,6 +484,11 @@ class StreamService : Service(), StreamServer.Callbacks, ClientSession.Listener,
     }
 
     // ---------------------------------------------------------------- utilidades
+
+    /** Temperatura da bateria em décimos de °C (Int.MIN_VALUE se indisponível). */
+    private fun batteryTenthsC(): Int =
+        registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+            ?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, Int.MIN_VALUE) ?: Int.MIN_VALUE
 
     private fun phoneName(): String =
         Settings.Global.getString(contentResolver, "device_name")?.takeIf { it.isNotBlank() }

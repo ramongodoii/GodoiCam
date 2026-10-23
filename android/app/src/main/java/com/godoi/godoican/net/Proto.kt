@@ -26,6 +26,8 @@ object Proto {
     const val PONG = 0x13
     const val KEYFRAME_REQ = 0x14
     const val BYE = 0x15
+    const val REPORT = 0x16
+    const val STATS = 0x17
 
     const val ERR_NOT_PAIRED = 1
     const val ERR_BAD_CODE = 2

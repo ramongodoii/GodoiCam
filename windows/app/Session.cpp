@@ -1,6 +1,8 @@
 #include "Session.h"
 
 #include <algorithm>
+#include <share.h>
+#include <stdio.h>
 
 #include "ImageUtil.h"
 #include "System.h"
@@ -327,6 +329,23 @@ void Session::Receive(Conn& conn, const std::string& phoneName) {
     uint64_t bytes = 0;
     int64_t latencySum = 0;
     int latencyCount = 0;
+    int64_t decodeSum = 0;
+    int decodeCount = 0;
+    struct PhoneStats {
+        bool valid = false;
+        int camFps = 0, encFps = 0, dropped = 0, queued = 0, encodeMs = -1, tempTenths = 0, thermal = 0;
+        uint32_t bits = 0, target = 0;
+    } phone;
+
+    // Uma linha por segundo em %APPDATA%\GodoiCan\stats.csv (Fase 0: medições).
+    std::wstring csvPath = AppDataFile(L"stats.csv");
+    bool csvNew = GetFileAttributesW(csvPath.c_str()) == INVALID_FILE_ATTRIBUTES;
+    FILE* csv = _wfsopen(csvPath.c_str(), L"ab", _SH_DENYWR);
+    if (csv && csvNew)
+        fputs("hora;celular;resolucao;cel_cam_fps;cel_env_fps;cel_mbps;cel_alvo_mbps;cel_descartados;cel_fila;"
+              "cel_codificacao_ms;cel_temp_c;cel_termico;pc_fps;pc_mbps;pc_decodificacao_ms;"
+              "atraso_captura_ate_pc_ms;rtt_ms;camera_em_uso\n",
+              csv);
 
     auto requestKeyframe = [&] {
         int64_t now = NowUs();
@@ -383,7 +402,11 @@ void Session::Receive(Conn& conn, const std::string& phoneName) {
             int64_t pts = r.I64();
             if (!r.ok || !decoder.Ready()) continue;
             bytes += payload.size();
-            if (!decoder.Decode(r.Rest(), r.Remaining(), pts, onFrame)) {
+            int64_t decodeStart = NowUs();
+            bool decoded = decoder.Decode(r.Rest(), r.Remaining(), pts, onFrame);
+            decodeSum += NowUs() - decodeStart;
+            decodeCount++;
+            if (!decoded) {
                 Log("decode falhou (flags=%d, %zu bytes): %s", flags, r.Remaining(), decoder.LastError());
                 requestKeyframe();
             }
@@ -411,6 +434,25 @@ void Session::Receive(Conn& conn, const std::string& phoneName) {
                 m_bestRtt = rtt;
                 m_clockOffset = phone - (sent + rtt / 2);
             }
+        } else if (type == proto::REPORT) {
+            std::wstring path = AppDataFile((L"relatorio-" + Widen(phoneName) + L".txt").c_str());
+            if (FILE* f = _wfopen(path.c_str(), L"wb")) {
+                fwrite(payload.data(), 1, payload.size(), f);
+                fclose(f);
+            }
+            Log("relatorio do aparelho salvo (%zu bytes)", payload.size());
+        } else if (type == proto::STATS) {
+            Reader r(payload);
+            phone.camFps = r.U16();
+            phone.encFps = r.U16();
+            phone.bits = r.U32();
+            phone.target = r.U32();
+            phone.dropped = r.U16();
+            phone.queued = r.U16();
+            phone.encodeMs = (int16_t)r.U16();
+            phone.tempTenths = (int16_t)r.U16();
+            phone.thermal = r.U8();
+            phone.valid = r.ok;
         } else if (type == proto::BYE || type == proto::ERROR_MSG) {
             break;
         }
@@ -429,6 +471,20 @@ void Session::Receive(Conn& conn, const std::string& phoneName) {
             } else {
                 SetStatus(State::Connected, L"Conectado a " + wname, L"Aguardando vídeo…");
             }
+            if (csv) {
+                SYSTEMTIME t;
+                GetLocalTime(&t);
+                fprintf(csv, "%02d:%02d:%02d;%s;%dx%d@%d;%d;%d;%.2f;%.2f;%d;%d;%d;%.1f;%d;%.1f;%.2f;%.2f;%d;%d;%d\n",
+                        t.wHour, t.wMinute, t.wSecond, phoneName.c_str(), cfgW, cfgH, cfgFps, phone.camFps,
+                        phone.encFps, phone.bits / 1e6, phone.target / 1e6, phone.dropped, phone.queued,
+                        phone.encodeMs, phone.tempTenths / 10.0, phone.thermal, frames / secs,
+                        bytes * 8 / secs / 1e6, decodeCount ? decodeSum / 1000.0 / decodeCount : 0.0,
+                        latencyCount ? (int)(latencySum / latencyCount / 1000) : -1, (int)(m_rtt / 1000),
+                        m_writer.CameraInUse() ? 1 : 0);
+                fflush(csv);
+            }
+            decodeSum = 0;
+            decodeCount = 0;
             windowStart = now;
             frames = 0;
             bytes = 0;
@@ -438,6 +494,7 @@ void Session::Receive(Conn& conn, const std::string& phoneName) {
     }
 
     if (dump) fclose(dump);
+    if (csv) fclose(csv);
     done = true;
     conn.Close();
     pinger.join();

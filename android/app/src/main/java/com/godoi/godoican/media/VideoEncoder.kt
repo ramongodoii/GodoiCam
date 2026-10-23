@@ -21,8 +21,15 @@ class VideoEncoder(
     val height: Int,
     val fps: Int,
     bitrate: Int,
+    /** Relógio dos timestamps da câmera, em µs, para medir captura → codificado. */
+    private val clockUs: () -> Long,
     private val onPacket: (ByteArray) -> Unit,
 ) {
+    /** Soma e contagem do atraso captura → saída do encoder desde a última leitura. */
+    private val delayLock = Any()
+    private var delaySumUs = 0L
+    private var delayCount = 0
+
     private val thread = HandlerThread("GodoiCan-encoder").apply { start() }
     private lateinit var codec: MediaCodec
     lateinit var inputSurface: Surface
@@ -38,7 +45,16 @@ class VideoEncoder(
         override fun onOutputBufferAvailable(codec: MediaCodec, index: Int, info: MediaCodec.BufferInfo) {
             try {
                 val buf = codec.getOutputBuffer(index)
-                if (buf != null && info.size > 0) onPacket(packet(buf, info))
+                if (buf != null && info.size > 0) {
+                    if (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0) {
+                        val d = clockUs() - info.presentationTimeUs
+                        if (d in 0..2_000_000) synchronized(delayLock) {
+                            delaySumUs += d
+                            delayCount++
+                        }
+                    }
+                    onPacket(packet(buf, info))
+                }
                 codec.releaseOutputBuffer(index, false)
             } catch (_: IllegalStateException) {
                 // Encoder parado no meio do callback.
@@ -113,6 +129,14 @@ class VideoEncoder(
         buf.limit(info.offset + info.size)
         buf.get(out, Proto.VIDEO_HEADER, info.size)
         return out
+    }
+
+    /** Atraso médio captura → codificado (ms) desde a última chamada; -1 sem amostras. */
+    fun takeEncodeDelayMs(): Int = synchronized(delayLock) {
+        val r = if (delayCount > 0) (delaySumUs / delayCount / 1000).toInt() else -1
+        delaySumUs = 0
+        delayCount = 0
+        r
     }
 
     fun requestKeyframe() {

@@ -5,6 +5,16 @@
 #include <share.h>
 #include <stdio.h>
 
+std::wstring AppDataFile(const wchar_t* name) {
+    PWSTR dir = nullptr;
+    std::wstring path;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &dir))) path = dir;
+    CoTaskMemFree(dir);
+    path += L"\\GodoiCan";
+    CreateDirectoryW(path.c_str(), nullptr);
+    return path + L"\\" + name;
+}
+
 void Log(const char* fmt, ...) {
     static std::mutex lock;
     static FILE* file = [] {

@@ -42,6 +42,13 @@ class ClientSession(
 
     fun sendConfig(payload: ByteArray) = enqueue(Packet(Proto.CONFIG, payload), urgent = false)
 
+    fun sendReport(text: String) = enqueue(Packet(Proto.REPORT, text.toByteArray(Charsets.UTF_8)), urgent = false)
+
+    fun sendStats(payload: ByteArray) = enqueue(Packet(Proto.STATS, payload), urgent = false)
+
+    /** Quadros de vídeo esperando na fila de envio agora. */
+    fun queuedFrames(): Int = synchronized(lock) { queuedVideo }
+
     /** [payload] = flags (1) + pts (8) + H.264. Chamado pela thread do encoder. */
     fun offerVideo(payload: ByteArray) {
         val flags = payload[0].toInt()

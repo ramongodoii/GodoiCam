@@ -29,6 +29,8 @@ enum Type : uint8_t {
     PONG = 0x13,
     KEYFRAME_REQ = 0x14,
     BYE = 0x15,
+    REPORT = 0x16,
+    STATS = 0x17,
 };
 
 enum Error : uint8_t {
@@ -104,6 +106,8 @@ private:
 
 // Registro de diagnóstico em %APPDATA%\GodoiCan\log.txt (sem conteúdo de vídeo nem chaves).
 void Log(const char* fmt, ...);
+// Caminho de um arquivo em %APPDATA%\GodoiCan (cria a pasta).
+std::wstring AppDataFile(const wchar_t* name);
 
 std::wstring Widen(const std::string& utf8);
 std::string Narrow(const std::wstring& wide);
