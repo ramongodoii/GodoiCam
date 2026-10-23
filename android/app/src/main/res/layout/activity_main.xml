@@ -1,0 +1,299 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/black">
+
+    <SurfaceView
+        android:id="@+id/preview"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <LinearLayout
+        android:id="@+id/topBar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top"
+        android:background="@drawable/scrim_top"
+        android:orientation="vertical"
+        android:paddingStart="20dp"
+        android:paddingTop="14dp"
+        android:paddingEnd="20dp"
+        android:paddingBottom="28dp">
+
+        <TextView
+            android:id="@+id/statusTitle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:drawablePadding="8dp"
+            android:textColor="@color/text_primary"
+            android:textSize="17sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/statusDetail"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:lineSpacingExtra="2dp"
+            android:textColor="@color/text_secondary"
+            android:textSize="13sp" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/toast"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:background="@drawable/chip"
+        android:paddingStart="16dp"
+        android:paddingTop="8dp"
+        android:paddingEnd="16dp"
+        android:paddingBottom="8dp"
+        android:textColor="@color/text_primary"
+        android:textSize="15sp"
+        android:visibility="gone" />
+
+    <HorizontalScrollView
+        android:id="@+id/bottomBar"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="16dp"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:background="@drawable/chip"
+            android:orientation="horizontal"
+            android:padding="6dp">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnSwitch"
+                style="@style/BarButton"
+                android:text="@string/switch_camera" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnTorch"
+                style="@style/BarButton"
+                android:text="@string/torch" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnSettings"
+                style="@style/BarButton"
+                android:text="@string/settings" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnCurtain"
+                style="@style/BarButton"
+                android:text="@string/curtain" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnPower"
+                style="@style/BarButton"
+                android:text="@string/power_off"
+                android:textColor="@color/accent" />
+        </LinearLayout>
+    </HorizontalScrollView>
+
+    <LinearLayout
+        android:id="@+id/pairCard"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:background="@drawable/card"
+        android:gravity="center_horizontal"
+        android:orientation="vertical"
+        android:paddingStart="36dp"
+        android:paddingTop="24dp"
+        android:paddingEnd="36dp"
+        android:paddingBottom="24dp"
+        android:visibility="gone">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/pair_title"
+            android:textColor="@color/text_secondary"
+            android:textSize="15sp" />
+
+        <TextView
+            android:id="@+id/pairCode"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:fontFamily="monospace"
+            android:letterSpacing="0.08"
+            android:textColor="@color/text_primary"
+            android:textSize="48sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/pairHint"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:gravity="center"
+            android:maxWidth="320dp"
+            android:textColor="@color/text_secondary"
+            android:textSize="14sp" />
+    </LinearLayout>
+
+    <ScrollView
+        android:id="@+id/settingsPanel"
+        android:layout_width="340dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="end"
+        android:background="@color/panel"
+        android:clickable="true"
+        android:focusable="true"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="20dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="@string/settings"
+                    android:textColor="@color/text_primary"
+                    android:textSize="20sp"
+                    android:textStyle="bold" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnCloseSettings"
+                    style="@style/Widget.Material3.Button.TextButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/close" />
+            </LinearLayout>
+
+            <TextView style="@style/Section" android:text="@string/section_video" />
+
+            <TextView style="@style/Label" android:text="@string/camera" />
+            <Spinner android:id="@+id/spCamera" style="@style/Picker" />
+
+            <TextView style="@style/Label" android:text="@string/resolution" />
+            <Spinner android:id="@+id/spResolution" style="@style/Picker" />
+
+            <TextView style="@style/Label" android:text="@string/fps" />
+            <Spinner android:id="@+id/spFps" style="@style/Picker" />
+
+            <TextView style="@style/Label" android:text="@string/quality" />
+            <Spinner android:id="@+id/spQuality" style="@style/Picker" />
+
+            <TextView style="@style/Section" android:text="@string/section_image" />
+
+            <com.google.android.material.materialswitch.MaterialSwitch
+                android:id="@+id/swMirror"
+                style="@style/Toggle"
+                android:text="@string/mirror" />
+
+            <com.google.android.material.materialswitch.MaterialSwitch
+                android:id="@+id/swFill"
+                style="@style/Toggle"
+                android:text="@string/fill" />
+
+            <com.google.android.material.materialswitch.MaterialSwitch
+                android:id="@+id/swAutoRotate"
+                style="@style/Toggle"
+                android:text="@string/auto_rotate" />
+
+            <TextView style="@style/Label" android:text="@string/rotation_offset" />
+            <Spinner android:id="@+id/spRotation" style="@style/Picker" />
+
+            <TextView
+                android:id="@+id/lblExposure"
+                style="@style/Label"
+                android:text="@string/exposure" />
+            <SeekBar
+                android:id="@+id/sbExposure"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp" />
+
+            <TextView style="@style/Label" android:text="@string/white_balance" />
+            <Spinner android:id="@+id/spAwb" style="@style/Picker" />
+
+            <com.google.android.material.materialswitch.MaterialSwitch
+                android:id="@+id/swAeLock"
+                style="@style/Toggle"
+                android:text="@string/ae_lock" />
+
+            <com.google.android.material.materialswitch.MaterialSwitch
+                android:id="@+id/swStabilization"
+                style="@style/Toggle"
+                android:text="@string/stabilization" />
+
+            <com.google.android.material.materialswitch.MaterialSwitch
+                android:id="@+id/swLowLight"
+                style="@style/Toggle"
+                android:text="@string/low_light" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnAutoFocus"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="@string/auto_focus" />
+
+            <TextView style="@style/Section" android:text="@string/section_pcs" />
+
+            <TextView
+                android:id="@+id/pairedList"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="@color/text_secondary"
+                android:textSize="14sp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnForget"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="@string/forget_pcs" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:text="@string/tips"
+                android:textColor="@color/text_secondary"
+                android:textSize="13sp" />
+        </LinearLayout>
+    </ScrollView>
+
+    <FrameLayout
+        android:id="@+id/curtain"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@android:color/black"
+        android:clickable="true"
+        android:focusable="true"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/curtainHint"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:text="@string/curtain_hint"
+            android:textColor="#33FFFFFF"
+            android:textSize="14sp" />
+    </FrameLayout>
+</FrameLayout>

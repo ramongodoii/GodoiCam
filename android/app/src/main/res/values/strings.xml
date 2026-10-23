@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">GodoiCan</string>
+    <string name="switch_camera">Trocar câmera</string>
+    <string name="torch">Lanterna</string>
+    <string name="settings">Ajustes</string>
+    <string name="curtain">Tela preta</string>
+    <string name="power_off">Desligar</string>
+    <string name="power_on">Ligar</string>
+    <string name="close">Fechar</string>
+    <string name="pair_title">Código de pareamento</string>
+    <string name="section_video">Vídeo</string>
+    <string name="section_image">Imagem</string>
+    <string name="section_pcs">PCs pareados</string>
+    <string name="camera">Câmera</string>
+    <string name="resolution">Resolução</string>
+    <string name="fps">Quadros por segundo</string>
+    <string name="quality">Qualidade (taxa de bits)</string>
+    <string name="mirror">Espelhar imagem</string>
+    <string name="fill">Preencher o quadro (corta as bordas)</string>
+    <string name="auto_rotate">Girar com o celular</string>
+    <string name="rotation_offset">Correção de rotação</string>
+    <string name="exposure">Exposição</string>
+    <string name="white_balance">Balanço de branco</string>
+    <string name="ae_lock">Travar exposição</string>
+    <string name="stabilization">Estabilização digital (aumenta o atraso)</string>
+    <string name="low_light">Priorizar pouca luz (o FPS pode cair)</string>
+    <string name="auto_focus">Voltar ao foco automático</string>
+    <string name="forget_pcs">Esquecer todos os PCs</string>
+    <string name="tips">Toque na imagem para focar. Toque duas vezes para voltar ao foco automático. Use dois dedos para zoom.</string>
+    <string name="curtain_hint">Toque duas vezes para voltar</string>
+</resources>

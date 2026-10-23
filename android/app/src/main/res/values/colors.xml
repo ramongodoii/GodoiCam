@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="accent">#FF7A45</color>
+    <color name="accent_dark">#B8461C</color>
+    <color name="panel">#F2121418</color>
+    <color name="card">#F01B1E24</color>
+    <color name="chip">#CC15171C</color>
+    <color name="text_primary">#F4F5F7</color>
+    <color name="text_secondary">#A9AEB8</color>
+    <color name="ok">#3DDC84</color>
+    <color name="wait">#FFC247</color>
+    <color name="off">#8A8F99</color>
+    <color name="launcher_bg">#16181D</color>
+</resources>
