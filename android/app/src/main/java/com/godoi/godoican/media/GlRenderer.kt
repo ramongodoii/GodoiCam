@@ -96,6 +96,11 @@ class GlRenderer {
     private var texId = 0
     private lateinit var surfaceTexture: SurfaceTexture
     private val texMatrix = FloatArray(16)
+    private val rawMatrix = FloatArray(16)
+
+    /** Última matriz da SurfaceTexture, para o relatório de diagnóstico. */
+    @Volatile var matrixInfo = ""
+        private set
     private val vertices = ByteBuffer.allocateDirect(16 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
 
     private var encSurface: EGLSurface? = null
@@ -210,7 +215,8 @@ class GlRenderer {
         } catch (_: Exception) {
             return
         }
-        surfaceTexture.getTransformMatrix(texMatrix)
+        surfaceTexture.getTransformMatrix(rawMatrix)
+        useBufferOrientation(rawMatrix, texMatrix)
         val ts = surfaceTexture.timestamp
         renderedFrames.incrementAndGet()
 
@@ -243,6 +249,32 @@ class GlRenderer {
                 prevSurface = null
                 prevTarget = null
             }
+        }
+    }
+
+    /**
+     * Alguns aparelhos (ex.: Samsung com Android 16) colocam a rotação do sensor dentro da
+     * matriz da SurfaceTexture. Todo o cálculo de rotação e proporção aqui parte da imagem
+     * como o sensor a entrega, então essa rotação é descartada: fica só a inversão vertical
+     * (e o recorte de borda, quando não há rotação).
+     */
+    private fun useBufferOrientation(raw: FloatArray, out: FloatArray) {
+        val plain = raw[0] > 0.5f && kotlin.math.abs(raw[1]) < 0.01f && kotlin.math.abs(raw[4]) < 0.01f && raw[5] < -0.5f
+        if (plain) {
+            raw.copyInto(out)
+        } else {
+            out.fill(0f)
+            out[0] = 1f   // s = u
+            out[5] = -1f  // t = 1 - v
+            out[10] = 1f
+            out[13] = 1f
+            out[15] = 1f
+        }
+        if (matrixInfo.isEmpty() || renderedFrames.get() % 300 == 0) {
+            matrixInfo = "%.2f %.2f / %.2f %.2f / desloc %.2f %.2f%s".format(
+                raw[0], raw[4], raw[1], raw[5], raw[12], raw[13],
+                if (plain) "" else " (rotação embutida descartada)",
+            )
         }
     }
 

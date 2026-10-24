@@ -102,6 +102,14 @@ class CameraController(context: Context, private val listener: Listener) {
             val b = d.createCaptureRequest(CameraDevice.TEMPLATE_RECORD)
             b.addTarget(target)
             b.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, fpsRange)
+            // Nada de a câmera girar/recortar sozinha (modo de compatibilidade de telas grandes):
+            // a rotação é feita na GPU.
+            if (Build.VERSION.SDK_INT >= 31) {
+                val modes = chars?.get(CameraCharacteristics.SCALER_AVAILABLE_ROTATE_AND_CROP_MODES) ?: intArrayOf()
+                if (CaptureRequest.SCALER_ROTATE_AND_CROP_NONE in modes) {
+                    b.set(CaptureRequest.SCALER_ROTATE_AND_CROP, CaptureRequest.SCALER_ROTATE_AND_CROP_NONE)
+                }
+            }
             builder = b
             d.createCaptureSession(listOf(target), object : CameraCaptureSession.StateCallback() {
                 override fun onConfigured(s: CameraCaptureSession) {

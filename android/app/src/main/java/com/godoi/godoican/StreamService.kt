@@ -434,7 +434,20 @@ class StreamService : Service(), StreamServer.Callbacks, ClientSession.Listener,
             session.listener = this
             session.clock = ::nowUs
             startEncoder(session)
-            Thread { session.sendReport(DeviceReport.build(this)) }.start()
+            Thread {
+                // Espera alguns quadros para o relatório incluir a matriz real da câmera.
+                Thread.sleep(1500)
+                val r = renderer
+                val extra = buildString {
+                    appendLine()
+                    appendLine("== Sessão")
+                    appendLine("Câmera atual: ${camInfo?.label} (id ${camInfo?.id}, sensor ${camInfo?.sensorOrientation}°)")
+                    appendLine("Buffer: ${r?.camW}x${r?.camH} • saída ${settings.width}x${settings.height} @ ${settings.fps}")
+                    appendLine("Rotação saída/prévia: ${r?.rotation}° / ${r?.previewRotation}° • orientação do celular $deviceOrientation°")
+                    appendLine("Matriz da SurfaceTexture: ${r?.matrixInfo}")
+                }
+                session.sendReport(DeviceReport.build(this) + extra)
+            }.start()
             Hub.update { it.copy(pcName = session.pcName, message = null) }
             updateNotification()
         }
