@@ -106,7 +106,7 @@ class GlRenderer {
     private var encSurface: EGLSurface? = null
     private var encW = 0
     private var encH = 0
-    private var minEncIntervalNs = 0L
+    @Volatile private var minEncIntervalNs = 0L
     private var lastEncTs = 0L
 
     private var prevSurface: EGLSurface? = null
@@ -175,6 +175,11 @@ class GlRenderer {
         encH = height
         minEncIntervalNs = if (fps > 0) 1_000_000_000L / fps * 8 / 10 else 0
         lastEncTs = 0
+    }
+
+    /** Codifica no máximo [fps] quadros por segundo (o resto da câmera vai só para a prévia). */
+    fun setEncodeFps(fps: Int) {
+        minEncIntervalNs = if (fps > 0) 1_000_000_000L / fps * 8 / 10 else 0
     }
 
     /** Mesma Surface com outro tamanho (giro da tela): só atualiza o tamanho, sem recriar nada. */

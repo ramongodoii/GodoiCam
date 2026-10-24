@@ -63,6 +63,7 @@ class StreamService : Service(), StreamServer.Callbacks, ClientSession.Listener,
         private const val NOTIF_PAIR = 2
         private const val CH_STREAM = "stream"
         private const val CH_PAIR = "pair"
+        private const val MIN_ENCODE_FPS = 10
 
         fun start(context: Context) {
             ContextCompat.startForegroundService(context, Intent(context, StreamService::class.java))
@@ -103,9 +104,12 @@ class StreamService : Service(), StreamServer.Callbacks, ClientSession.Listener,
 
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
+    private var wifiPerfLock: WifiManager.WifiLock? = null
     private var multicastLock: WifiManager.MulticastLock? = null
 
     private var targetBitrate = 0
+    /** Quadros por segundo codificados agora (cai com a rede ruim, volta aos poucos). */
+    @Volatile private var encodeFps = 30
     private var lastCongestion = 0L
     private var statsTicks = 0
 
@@ -413,6 +417,7 @@ class StreamService : Service(), StreamServer.Callbacks, ClientSession.Listener,
         }
         encoder = enc
         targetBitrate = enc.bitrate
+        encodeFps = fps
         s.sendConfig(
             Writer().u16(Proto.CODEC_H264).u16(w).u16(h).u16(fps).u32(enc.bitrate)
                 .str("${camInfo?.label ?: "Câmera"} • ${enc.codecName}").build(),
@@ -470,13 +475,21 @@ class StreamService : Service(), StreamServer.Callbacks, ClientSession.Listener,
     }
 
     /** A rede não acompanhou: baixa o bitrate (até 1/4 do alvo) e pede um quadro-chave. */
+    /**
+     * A rede não acompanhou: codifica menos quadros por segundo e baixa o bitrate. Menos
+     * quadros não exige quadro-chave (que é grande e pioraria o aperto); a imagem segue fluida.
+     */
     override fun onCongestion() {
         ctrl.post {
             val e = encoder ?: return@post
             lastCongestion = SystemClock.elapsedRealtime()
-            val reduced = maxOf(targetBitrate / 4, e.bitrate * 7 / 10)
+            val reduced = maxOf(targetBitrate / 5, e.bitrate * 3 / 4)
             if (reduced < e.bitrate) e.setBitrate(reduced)
-            e.requestKeyframe()
+            val fps = maxOf(MIN_ENCODE_FPS, encodeFps * 2 / 3)
+            if (fps < encodeFps) {
+                encodeFps = fps
+                renderer?.setEncodeFps(fps)
+            }
         }
     }
 
@@ -497,11 +510,17 @@ class StreamService : Service(), StreamServer.Callbacks, ClientSession.Listener,
                 s.sendStats(
                     Writer().u16(camFps).u16(encFps).u32(bits.toInt()).u32(e.bitrate).u16(dropped.toInt())
                         .u16(s.queuedFrames()).u16(encDelay.coerceIn(-1, 30000) and 0xffff)
-                        .u16(temp.coerceIn(-32768, 32767) and 0xffff).u8(thermal).build(),
+                        .u16(temp.coerceIn(-32768, 32767) and 0xffff).u8(thermal)
+                        .also { wifiStats(it) }.u8(encodeFps).build(),
                 )
-                // Recupera o bitrate aos poucos depois de 4 s sem congestionamento.
-                if (e.bitrate < targetBitrate && SystemClock.elapsedRealtime() - lastCongestion > 4000) {
-                    e.setBitrate(min(targetBitrate, e.bitrate * 115 / 100))
+                // Recupera aos poucos depois de 3 s sem congestionamento: primeiro FPS, depois bitrate.
+                if (SystemClock.elapsedRealtime() - lastCongestion > 3000) {
+                    if (encodeFps < settings.fps) {
+                        encodeFps = min(settings.fps, encodeFps + 5)
+                        r.setEncodeFps(encodeFps)
+                    } else if (e.bitrate < targetBitrate) {
+                        e.setBitrate(min(targetBitrate, e.bitrate * 115 / 100))
+                    }
                 }
                 "Enviando $encFps fps • ${"%.1f".format(bits / 1e6)} Mbps" +
                     (if (encDelay >= 0) " • codificação $encDelay ms" else "") + tempText +
@@ -550,6 +569,24 @@ class StreamService : Service(), StreamServer.Callbacks, ClientSession.Listener,
 
     // ---------------------------------------------------------------- utilidades
 
+    /** Frequência (MHz), sinal (dBm), velocidade do link (Mbps) e tela ligada, para o diagnóstico. */
+    @Suppress("DEPRECATION")
+    private fun wifiStats(w: Writer) {
+        val info = try {
+            applicationContext.getSystemService(WifiManager::class.java).connectionInfo
+        } catch (_: Exception) {
+            null
+        }
+        val link = when {
+            info == null -> 0
+            Build.VERSION.SDK_INT >= 29 -> info.txLinkSpeedMbps
+            else -> info.linkSpeed
+        }
+        w.u16((info?.frequency ?: 0).coerceIn(0, 65535)).u16((info?.rssi ?: 0) and 0xffff)
+            .u16(link.coerceIn(0, 65535))
+            .u8(if (getSystemService(PowerManager::class.java).isInteractive) 1 else 0)
+    }
+
     /** Temperatura da bateria em décimos de °C (Int.MIN_VALUE se indisponível). */
     private fun batteryTenthsC(): Int =
         registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
@@ -583,6 +620,13 @@ class StreamService : Service(), StreamServer.Callbacks, ClientSession.Listener,
             setReferenceCounted(false)
             acquire()
         }
+        // O modo de baixa latência só vale com a tela ligada; este mantém o Wi-Fi sem economia
+        // de energia também com a tela apagada.
+        @Suppress("DEPRECATION")
+        wifiPerfLock = wifi.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "GodoiCan-perf").apply {
+            setReferenceCounted(false)
+            acquire()
+        }
         multicastLock = wifi.createMulticastLock("GodoiCan").apply {
             setReferenceCounted(false)
             acquire()
@@ -592,6 +636,8 @@ class StreamService : Service(), StreamServer.Callbacks, ClientSession.Listener,
     private fun releaseLocks() {
         wakeLock?.release()
         wifiLock?.release()
+        wifiPerfLock?.release()
+        wifiPerfLock = null
         multicastLock?.release()
         wakeLock = null
         wifiLock = null

@@ -354,17 +354,29 @@ void Session::Receive(Conn& conn, const std::string& phoneName) {
     struct PhoneStats {
         bool valid = false;
         int camFps = 0, encFps = 0, dropped = 0, queued = 0, encodeMs = -1, tempTenths = 0, thermal = 0;
+        int wifiMhz = 0, rssi = 0, linkMbps = 0, screenOn = -1, fpsTarget = 0;
         uint32_t bits = 0, target = 0;
     } phone;
 
     // Uma linha por segundo em %APPDATA%\GodoiCan\stats.csv (Fase 0: medições).
     std::wstring csvPath = AppDataFile(L"stats.csv");
+    // Arquivo com cabeçalho antigo (sem as colunas de Wi-Fi): guarda à parte e começa outro.
+    if (FILE* old = _wfopen(csvPath.c_str(), L"rb")) {
+        char head[512] = {};
+        fgets(head, sizeof(head), old);
+        fclose(old);
+        if (!strstr(head, "wifi_mhz")) {
+            std::wstring backup = AppDataFile(L"stats-antigo.csv");
+            DeleteFileW(backup.c_str());
+            MoveFileW(csvPath.c_str(), backup.c_str());
+        }
+    }
     bool csvNew = GetFileAttributesW(csvPath.c_str()) == INVALID_FILE_ATTRIBUTES;
     FILE* csv = _wfsopen(csvPath.c_str(), L"ab", _SH_DENYWR);
     if (csv && csvNew)
         fputs("hora;celular;resolucao;cel_cam_fps;cel_env_fps;cel_mbps;cel_alvo_mbps;cel_descartados;cel_fila;"
               "cel_codificacao_ms;cel_temp_c;cel_termico;pc_fps;pc_mbps;pc_decodificacao_ms;"
-              "atraso_captura_ate_pc_ms;rtt_ms;camera_em_uso\n",
+              "atraso_captura_ate_pc_ms;rtt_ms;camera_em_uso;cel_fps_alvo;wifi_mhz;wifi_rssi_dbm;wifi_link_mbps;tela_ligada\n",
               csv);
 
     auto requestKeyframe = [&] {
@@ -479,6 +491,13 @@ void Session::Receive(Conn& conn, const std::string& phoneName) {
             phone.encodeMs = (int16_t)r.U16();
             phone.tempTenths = (int16_t)r.U16();
             phone.thermal = r.U8();
+            if (r.Remaining() >= 8) {  // celular com diagnóstico de Wi-Fi
+                phone.wifiMhz = r.U16();
+                phone.rssi = (int16_t)r.U16();
+                phone.linkMbps = r.U16();
+                phone.screenOn = r.U8();
+                phone.fpsTarget = r.U8();
+            }
             phone.valid = r.ok;
         } else if (type == proto::BYE || type == proto::ERROR_MSG) {
             break;
@@ -492,10 +511,11 @@ void Session::Receive(Conn& conn, const std::string& phoneName) {
                 wchar_t brief[128], stats[512];
                 swprintf_s(brief, L"%d×%d • %.0f fps • %d ms", cfgW, cfgH, frames / secs, latencyMs);
                 swprintf_s(stats,
-                           L"Celular: câmera %d fps • enviando %d fps • %.1f Mbps • codificação %d ms • %.1f °C\n"
+                           L"Celular: câmera %d fps • enviando %d fps • %.1f Mbps • codificação %d ms • %.1f °C • Wi-Fi %.1f GHz %d dBm\n"
                            L"PC: %.0f fps • decodificação %.1f ms • atraso captura→PC %d ms • rede %d ms • "
                            L"câmera virtual %s",
                            phone.camFps, phone.encFps, phone.bits / 1e6, phone.encodeMs, phone.tempTenths / 10.0,
+                           phone.wifiMhz / 1000.0, phone.rssi,
                            frames / secs, decodeCount ? decodeSum / 1000.0 / decodeCount : 0.0, latencyMs,
                            (int)(m_rtt / 1000), m_writer.CameraInUse() ? L"em uso" : L"livre");
                 if (GetStatus().state != State::Streaming) SetStatus(State::Streaming, L"Transmitindo de " + wname);
@@ -506,13 +526,14 @@ void Session::Receive(Conn& conn, const std::string& phoneName) {
             if (csv) {
                 SYSTEMTIME t;
                 GetLocalTime(&t);
-                fprintf(csv, "%02d:%02d:%02d;%s;%dx%d@%d;%d;%d;%.2f;%.2f;%d;%d;%d;%.1f;%d;%.1f;%.2f;%.2f;%d;%d;%d\n",
+                fprintf(csv, "%02d:%02d:%02d;%s;%dx%d@%d;%d;%d;%.2f;%.2f;%d;%d;%d;%.1f;%d;%.1f;%.2f;%.2f;%d;%d;%d;%d;%d;%d;%d;%d\n",
                         t.wHour, t.wMinute, t.wSecond, phoneName.c_str(), cfgW, cfgH, cfgFps, phone.camFps,
                         phone.encFps, phone.bits / 1e6, phone.target / 1e6, phone.dropped, phone.queued,
                         phone.encodeMs, phone.tempTenths / 10.0, phone.thermal, frames / secs,
                         bytes * 8 / secs / 1e6, decodeCount ? decodeSum / 1000.0 / decodeCount : 0.0,
                         latencyCount ? (int)(latencySum / latencyCount / 1000) : -1, (int)(m_rtt / 1000),
-                        m_writer.CameraInUse() ? 1 : 0);
+                        m_writer.CameraInUse() ? 1 : 0, phone.fpsTarget, phone.wifiMhz, phone.rssi, phone.linkMbps,
+                        phone.screenOn);
                 fflush(csv);
             }
             decodeSum = 0;

@@ -58,6 +58,7 @@ class ClientSession(
         val isKey = flags and Proto.VIDEO_KEY != 0
         val isConfig = flags and Proto.VIDEO_CONFIG != 0
         var congested = false
+        var needKeyframe = false
         synchronized(lock) {
             if (closed) return
             if (!isConfig) {
@@ -65,6 +66,8 @@ class ClientSession(
                     framesDropped.incrementAndGet()
                     return
                 }
+                // Fila crescendo: avisa cedo, para o serviço baixar FPS e bitrate antes de perder quadros.
+                if (queuedVideo >= EARLY_WARNING_FRAMES) congested = true
                 if (queuedVideo >= MAX_QUEUED_FRAMES) {
                     val before = queue.size
                     queue.removeAll { it.type == Proto.VIDEO && it.data[0].toInt() and Proto.VIDEO_CONFIG == 0 }
@@ -74,6 +77,7 @@ class ClientSession(
                     if (!isKey) {
                         waitingKeyframe = true
                         framesDropped.incrementAndGet()
+                        needKeyframe = true
                     }
                 }
                 if (isKey) waitingKeyframe = false
@@ -84,7 +88,8 @@ class ClientSession(
                 lock.notifyAll()
             }
         }
-        if (congested) listener?.onCongestion()
+        if (congested) signalCongestion()
+        if (needKeyframe) listener?.onKeyframeRequest()
     }
 
     private fun enqueue(p: Packet, urgent: Boolean) {
@@ -119,6 +124,7 @@ class ClientSession(
                 }
                 if (stale) {
                     signalCongestion()
+                    listener?.onKeyframeRequest()
                     continue
                 }
                 io.send(p.type, p.data)
@@ -181,11 +187,14 @@ class ClientSession(
     }
 
     companion object {
-        private const val MAX_QUEUED_FRAMES = 3
+        /** A partir daqui a fila já indica congestionamento (baixa FPS e bitrate). */
+        private const val EARLY_WARNING_FRAMES = 2
+        /** Só com a fila cheia descarta quadros (e aí precisa de um quadro-chave). */
+        private const val MAX_QUEUED_FRAMES = 6
         /** Quadro que esperou mais que isso na fila é descartado. */
-        private const val STALE_MS = 200L
+        private const val STALE_MS = 500L
         /** Envio que levou mais que isso indica congestionamento. */
-        private const val SLOW_SEND_MS = 150L
+        private const val SLOW_SEND_MS = 120L
         /** Buffer de envio do sistema: ~50 ms de vídeo a 10 Mbps, para o atraso não se esconder nele. */
         const val SOCKET_SEND_BUFFER = 64 * 1024
     }
