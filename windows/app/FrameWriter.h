@@ -11,7 +11,7 @@ class FrameWriter {
 public:
     ~FrameWriter();
     // Chamado periodicamente: abre a memória quando a câmera virtual a cria e sinaliza que o app vive.
-    void Heartbeat(bool streaming);
+    void Heartbeat(bool streaming, LONG flags = 0);
     void Write(const uint8_t* y, int yPitch, const uint8_t* uv, int uvPitch, int width, int height);
     // A câmera virtual está sendo lida por algum aplicativo agora?
     bool CameraInUse();

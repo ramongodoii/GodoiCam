@@ -88,6 +88,14 @@ void FrameSource::Fill(BYTE* dst, LONG pitch, UINT32 width, UINT32 height, const
     }
 
     bool nv12 = subtype == MFVideoFormat_NV12;
+    if (!streaming && m_shared && appRunning && (m_shared->flags & GDC_FLAG_BLANK_WHEN_IDLE)) {
+        // Preto: Y=16 e UV=128 em NV12; zeros em RGB32.
+        UINT32 rows = nv12 ? height * 3 / 2 : height;
+        UINT32 rowBytes = nv12 ? width : width * 4;
+        for (UINT32 y = 0; y < rows; y++)
+            memset(dst + (size_t)y * pitch, nv12 ? (y < height ? 16 : 128) : 0, rowBytes);
+        return;
+    }
     if (!streaming) {
         const std::vector<BYTE>& ph = Placeholder(width, height, subtype, appRunning);
         UINT32 rowBytes = nv12 ? width : width * 4;

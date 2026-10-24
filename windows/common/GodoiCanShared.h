@@ -26,6 +26,9 @@ constexpr uint64_t GDC_WRITER_TIMEOUT_MS = 1500;
 // Sem leitura da câmera por esse tempo, o app considera a câmera fechada.
 constexpr uint64_t GDC_READER_TIMEOUT_MS = 1500;
 
+// Opções do app lidas pela câmera virtual.
+constexpr LONG GDC_FLAG_BLANK_WHEN_IDLE = 1;  // sem celular: vídeo preto em vez da tela de espera
+
 enum GdcState : LONG {
     GDC_STATE_IDLE = 0,       // app aberto, sem celular
     GDC_STATE_STREAMING = 1,  // quadros chegando
@@ -44,5 +47,5 @@ struct GdcShared {
     volatile LONG state;         // GdcState
     volatile LONG width;
     volatile LONG height;
-    volatile LONG reserved1;
+    volatile LONG flags;  // GDC_FLAG_*
 };

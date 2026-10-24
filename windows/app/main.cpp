@@ -1,17 +1,24 @@
-// GodoiCan para Windows: encontra o celular, recebe o vídeo e alimenta a câmera virtual.
+// GodoiCan para Windows. Janela no estilo "só o vídeo": uma barra fina com o seletor de
+// celular e o menu ☰; o resto é a imagem. Conecta sozinho ao celular pareado (Wi‑Fi ou USB)
+// e continua na bandeja quando a janela é fechada.
 #include <winsock2.h>
 #include <windows.h>
 #include <commctrl.h>
 #include <mfapi.h>
 #include <shellapi.h>
+#include <shlobj.h>
 #include <windowsx.h>
 
+#include <atomic>
 #include <memory>
+#include <set>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "Discovery.h"
 #include "FrameWriter.h"
+#include "Net.h"
 #include "PairStore.h"
 #include "Session.h"
 #include "System.h"
@@ -23,285 +30,594 @@ enum : UINT {
     WM_APP_STATUS = WM_APP + 1,
     WM_APP_PREVIEW,
     WM_APP_DEVICES,
+    WM_APP_TRAY,
 };
 
 enum : int {
-    ID_LIST = 100,
-    ID_CONNECT,
-    ID_USB,
-    ID_IP,
-    ID_IP_GO,
-    ID_CODE,
-    ID_CODE_GO,
-    ID_AUTO,
-    ID_DISCONNECT,
-    ID_CAMERA,
-    ID_FORGET,
-    ID_TIMER = 1,
+    ID_DEVICE = 100,
+    ID_MENU,
+    ID_PANEL_TEXT,
+    ID_PANEL_EDIT,
+    ID_PANEL_OK,
+    ID_PANEL_CANCEL,
+
+    IDM_IP = 200,
+    IDM_USB,
+    IDM_DISCONNECT,
+    IDM_AUTO,
+    IDM_BLANK,
+    IDM_STARTUP,
+    IDM_STATS,
+    IDM_CAMERA,
+    IDM_FORGET,
+    IDM_FOLDER,
+    IDM_OPEN,
+    IDM_EXIT,
+
+    TIMER_TICK = 1,
 };
+
+enum class Panel { None, Code, Ip };
+
+struct Choice {
+    enum Kind { Phone, Usb, Ip, Current } kind;
+    PhoneInfo phone;
+};
+
+const COLORREF kBar = RGB(32, 34, 40);
+const COLORREF kVideo = RGB(16, 17, 20);
+const COLORREF kText = RGB(236, 238, 242);
+const COLORREF kMuted = RGB(150, 156, 168);
+const COLORREF kOk = RGB(61, 220, 132);
+const COLORREF kWait = RGB(255, 194, 71);
+const COLORREF kBad = RGB(255, 107, 107);
 
 struct App {
     HWND wnd = nullptr;
-    HFONT font = nullptr, fontBold = nullptr, fontTitle = nullptr;
+    HWND combo = nullptr, btnMenu = nullptr, panelText = nullptr, panelEdit = nullptr, panelOk = nullptr,
+         panelCancel = nullptr;
+    HFONT font = nullptr, fontSmall = nullptr, fontBig = nullptr, fontTitle = nullptr, fontIcon = nullptr;
+    HBRUSH barBrush = nullptr, videoBrush = nullptr;
     UINT dpi = 96;
-
-    HWND lblPhones, list, btnConnect, btnUsb, lblIp, editIp, btnIp, lblCode, editCode, btnCode, chkAuto,
-        btnDisconnect, lblStatus, lblDetail, lblCamera, btnCamera, btnForget;
 
     PairStore pairs;
     FrameWriter writer;
     Discovery discovery;
     std::unique_ptr<Session> session;
     std::vector<PhoneInfo> phones;
+    std::vector<Choice> choices;
+    bool suppressCombo = false;
 
-    bool userStopped = false;     // o usuário desconectou: não reconectar sozinho
+    bool userStopped = false;  // o usuário desconectou: nada de reconectar sozinho
     bool cameraReady = false;
     std::wstring cameraMessage;
+    bool showStats = false;
+    bool blankIdle = false;
+    Panel panel = Panel::None;
+
+    std::set<std::string> autoPairTried;  // celulares não pareados já oferecidos nesta execução
+    std::atomic<bool> usbPresent{false};
+    std::atomic<bool> quitting{false};
+    std::thread usbThread;
+    ULONGLONG nextAuto = 0;
+    ULONGLONG lastUsbFail = 0;
+    bool autoUsbRunning = false;
 
     std::vector<uint8_t> preview;
     int previewW = 0, previewH = 0;
-    RECT previewRect{};
+    RECT barRect{}, videoRect{};
+
+    bool trayAdded = false;
+    bool trayHintShown = false;
 } g;
 
 int S(int v) { return MulDiv(v, (int)g.dpi, 96); }
 
-HWND Make(const wchar_t* cls, const wchar_t* text, DWORD style, int id, DWORD exStyle = 0) {
-    HWND h = CreateWindowExW(exStyle, cls, text, WS_CHILD | WS_VISIBLE | style, 0, 0, 10, 10, g.wnd,
-                             (HMENU)(INT_PTR)id, GetModuleHandleW(nullptr), nullptr);
-    SendMessageW(h, WM_SETFONT, (WPARAM)g.font, TRUE);
-    return h;
+// ------------------------------------------------------------------------------------ preferências
+
+DWORD GetPref(const wchar_t* name, DWORD def) {
+    DWORD value = def, size = sizeof(value);
+    RegGetValueW(HKEY_CURRENT_USER, L"Software\\GodoiCan", name, RRF_RT_REG_DWORD, nullptr, &value, &size);
+    return value;
 }
 
+void SetPref(const wchar_t* name, DWORD value) {
+    HKEY key;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\GodoiCan", 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key,
+                        nullptr) == ERROR_SUCCESS) {
+        RegSetValueExW(key, name, 0, REG_DWORD, (const BYTE*)&value, sizeof(value));
+        RegCloseKey(key);
+    }
+}
+
+// ------------------------------------------------------------------------------------ fontes e layout
+
 void CreateFonts() {
-    if (g.font) DeleteObject(g.font);
-    if (g.fontBold) DeleteObject(g.fontBold);
-    if (g.fontTitle) DeleteObject(g.fontTitle);
-    g.font = CreateFontW(-S(14), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0,
-                         L"Segoe UI");
-    g.fontBold = CreateFontW(-S(14), 0, 0, 0, FW_SEMIBOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0,
-                             L"Segoe UI");
-    g.fontTitle = CreateFontW(-S(19), 0, 0, 0, FW_SEMIBOLD, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0,
-                              L"Segoe UI");
+    for (HFONT* f : {&g.font, &g.fontSmall, &g.fontBig, &g.fontTitle, &g.fontIcon})
+        if (*f) DeleteObject(*f);
+    auto make = [](int px, int weight, const wchar_t* face) {
+        return CreateFontW(-S(px), 0, 0, 0, weight, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, face);
+    };
+    g.font = make(14, FW_NORMAL, L"Segoe UI");
+    g.fontSmall = make(12, FW_NORMAL, L"Segoe UI");
+    g.fontBig = make(26, FW_SEMIBOLD, L"Segoe UI");
+    g.fontTitle = make(20, FW_SEMIBOLD, L"Segoe UI");
+    g.fontIcon = make(18, FW_NORMAL, L"Segoe UI Symbol");
 }
 
 void ApplyFonts() {
-    for (HWND h : {g.lblPhones, g.list, g.btnConnect, g.btnUsb, g.lblIp, g.editIp, g.btnIp, g.lblCode, g.btnCode,
-                   g.chkAuto, g.btnDisconnect, g.lblDetail, g.lblCamera, g.btnCamera, g.btnForget})
-        SendMessageW(h, WM_SETFONT, (WPARAM)g.font, TRUE);
-    SendMessageW(g.lblStatus, WM_SETFONT, (WPARAM)g.fontTitle, TRUE);
-    SendMessageW(g.editCode, WM_SETFONT, (WPARAM)g.fontTitle, TRUE);
+    for (HWND h : {g.combo, g.panelText, g.panelOk, g.panelCancel}) SendMessageW(h, WM_SETFONT, (WPARAM)g.font, TRUE);
+    SendMessageW(g.btnMenu, WM_SETFONT, (WPARAM)g.fontIcon, TRUE);
+    SendMessageW(g.panelEdit, WM_SETFONT, (WPARAM)g.fontBig, TRUE);
 }
 
 void Layout() {
     RECT rc;
     GetClientRect(g.wnd, &rc);
-    int x = S(18), w = S(310), y = S(16), gap = S(8), bh = S(32);
-    auto put = [](HWND h, int x, int y, int w, int hgt) { MoveWindow(h, x, y, w, hgt, TRUE); };
+    int barH = S(44);
+    g.barRect = {0, 0, rc.right, barH};
+    g.videoRect = {0, barH, rc.right, rc.bottom};
 
-    put(g.lblPhones, x, y, w, S(20));
-    y += S(24);
-    put(g.list, x, y, w, S(132));
-    y += S(132) + gap;
-    int half = (w - gap) / 2;
-    put(g.btnConnect, x, y, half, bh);
-    put(g.btnUsb, x + half + gap, y, half, bh);
-    y += bh + S(14);
+    MoveWindow(g.btnMenu, S(8), S(6), S(36), S(32), TRUE);
+    // A altura do combo inclui a lista aberta.
+    MoveWindow(g.combo, S(52), S(8), std::min(S(340), std::max(S(160), (int)rc.right - S(320))), S(300), TRUE);
 
-    put(g.lblIp, x, y, w, S(20));
-    y += S(22);
-    put(g.editIp, x, y, w - S(110) - gap, S(28));
-    put(g.btnIp, x + w - S(110), y - S(2), S(110), bh);
-    y += bh + S(14);
+    int cx = (g.videoRect.left + g.videoRect.right) / 2, cy = (g.videoRect.top + g.videoRect.bottom) / 2;
+    int pw = S(440);
+    MoveWindow(g.panelText, cx - pw / 2, cy - S(96), pw, S(56), TRUE);
+    MoveWindow(g.panelEdit, cx - S(110), cy - S(30), S(220), S(48), TRUE);
+    MoveWindow(g.panelOk, cx - S(116), cy + S(32), S(110), S(34), TRUE);
+    MoveWindow(g.panelCancel, cx + S(6), cy + S(32), S(110), S(34), TRUE);
 
-    put(g.lblCode, x, y, w, S(20));
-    y += S(22);
-    put(g.editCode, x, y, w - S(110) - gap, S(34));
-    put(g.btnCode, x + w - S(110), y, S(110), S(34));
-    y += S(34) + S(14);
-
-    put(g.chkAuto, x, y, w, S(22));
-    y += S(22) + gap;
-    put(g.btnDisconnect, x, y, w, bh);
-    y += bh + S(18);
-
-    put(g.lblStatus, x, y, w, S(52));
-    y += S(54);
-    put(g.lblDetail, x, y, w, S(96));
-
-    int bottom = rc.bottom - S(16);
-    put(g.btnCamera, x, bottom - bh, half, bh);
-    put(g.btnForget, x + half + gap, bottom - bh, half, bh);
-    put(g.lblCamera, x, bottom - bh - S(44), w, S(40));
-
-    // Prévia 16:9 à direita.
-    int px = x + w + S(24), py = S(16);
-    int pw = rc.right - px - S(18), ph = rc.bottom - py - S(16);
-    if (pw * 9 > ph * 16) pw = ph * 16 / 9;
-    else ph = pw * 9 / 16;
-    g.previewRect = {px, py, px + std::max(pw, 0), py + std::max(ph, 0)};
-    InvalidateRect(g.wnd, nullptr, TRUE);
+    bool visible = IsWindowVisible(g.wnd) && !IsIconic(g.wnd);
+    g.session->SetPreviewSize(visible ? g.videoRect.right - g.videoRect.left : 0,
+                              visible ? g.videoRect.bottom - g.videoRect.top : 0);
+    InvalidateRect(g.wnd, nullptr, FALSE);
 }
 
-std::wstring PhoneLabel(const PhoneInfo& p) {
-    Bytes key;
-    bool paired = g.pairs.Key(p.id, key);
-    return Widen(p.name) + L"   " + Widen(p.ip) + (paired ? L"   ✓ pareado" : L"");
-}
+// ------------------------------------------------------------------------------------ painel central
 
-void RefreshList() {
-    g.phones = g.discovery.Phones();
-    int sel = ListBox_GetCurSel(g.list);
-    std::string selectedId = sel >= 0 && sel < (int)g.phones.size() ? g.phones[sel].id : "";
-    ListBox_ResetContent(g.list);
-    for (auto& p : g.phones) ListBox_AddString(g.list, PhoneLabel(p).c_str());
-    if (g.phones.empty()) {
-        ListBox_AddString(g.list, L"Procurando… abra o GodoiCan no celular (mesmo Wi-Fi).");
-        EnableWindow(g.list, FALSE);
+void ShowPanel(Panel p) {
+    g.panel = p;
+    bool on = p != Panel::None;
+    for (HWND h : {g.panelText, g.panelEdit, g.panelOk, g.panelCancel}) ShowWindow(h, on ? SW_SHOW : SW_HIDE);
+    if (!on) {
+        InvalidateRect(g.wnd, nullptr, FALSE);
         return;
     }
-    EnableWindow(g.list, TRUE);
-    int index = 0;
-    for (int i = 0; i < (int)g.phones.size(); i++)
-        if (g.phones[i].id == selectedId || (selectedId.empty() && g.phones[i].id == g.pairs.LastPhone())) index = i;
-    ListBox_SetCurSel(g.list, index);
+    SetWindowTextW(g.panelEdit, L"");
+    LONG_PTR style = GetWindowLongPtrW(g.panelEdit, GWL_STYLE);
+    if (p == Panel::Code) {
+        SetWindowLongPtrW(g.panelEdit, GWL_STYLE, style | ES_NUMBER);
+        SendMessageW(g.panelEdit, EM_SETLIMITTEXT, 6, 0);
+        SendMessageW(g.panelEdit, EM_SETCUEBANNER, TRUE, (LPARAM)L"000000");
+        Session::Status s = g.session->GetStatus();
+        std::wstring text = L"Digite o código de 6 dígitos que apareceu no celular";
+        if (!s.phoneName.empty()) text += L"\n" + s.phoneName;
+        SetWindowTextW(g.panelText, text.c_str());
+        SetWindowTextW(g.panelOk, L"Parear");
+    } else {
+        SetWindowLongPtrW(g.panelEdit, GWL_STYLE, style & ~ES_NUMBER);
+        SendMessageW(g.panelEdit, EM_SETLIMITTEXT, 40, 0);
+        SendMessageW(g.panelEdit, EM_SETCUEBANNER, TRUE, (LPARAM)L"192.168.0.15");
+        SetWindowTextW(g.panelText, L"IP do celular\n(aparece no topo do app GodoiCan no celular)");
+        SetWindowTextW(g.panelOk, L"Conectar");
+    }
+    SetFocus(g.panelEdit);
+    InvalidateRect(g.wnd, nullptr, FALSE);
 }
 
-void Start(const Target& t) {
+void Start(Target t) {
     g.userStopped = false;
+    g.autoUsbRunning = t.automatic && t.usb;
+    g.preview.clear();
     g.session->Connect(t);
 }
 
-void ConnectSelected() {
-    int sel = ListBox_GetCurSel(g.list);
-    if (sel < 0 || sel >= (int)g.phones.size()) return;
-    const PhoneInfo& p = g.phones[sel];
-    Target t;
-    t.host = p.ip;
-    t.port = p.port;
-    t.phoneId = p.id;
-    t.name = p.name;
-    Start(t);
-}
-
-void ConnectUsb() {
-    Target t;
-    t.usb = true;
-    t.name = "celular (USB)";
-    Start(t);
-}
-
-void ConnectIp() {
-    wchar_t buf[128];
-    GetWindowTextW(g.editIp, buf, 128);
-    std::string host = Narrow(buf);
-    while (!host.empty() && host.back() == ' ') host.pop_back();
-    while (!host.empty() && host.front() == ' ') host.erase(0, 1);
-    if (host.empty()) return;
-    Target t;
-    t.host = host;
-    size_t colon = host.find(':');
-    if (colon != std::string::npos) {
-        t.host = host.substr(0, colon);
-        t.port = (uint16_t)atoi(host.c_str() + colon + 1);
+void PanelOk() {
+    wchar_t buf[64];
+    GetWindowTextW(g.panelEdit, buf, 64);
+    std::string text = Narrow(buf);
+    if (g.panel == Panel::Code) {
+        std::string digits;
+        for (char c : text)
+            if (c >= '0' && c <= '9') digits += c;
+        if (digits.size() != 6) {
+            MessageBeep(MB_ICONWARNING);
+            return;
+        }
+        g.session->SubmitCode(digits);
+        ShowPanel(Panel::None);
+    } else if (g.panel == Panel::Ip) {
+        while (!text.empty() && text.back() == ' ') text.pop_back();
+        while (!text.empty() && text.front() == ' ') text.erase(0, 1);
+        if (text.empty()) return;
+        Target t;
+        t.host = text;
+        size_t colon = text.find(':');
+        if (colon != std::string::npos) {
+            t.host = text.substr(0, colon);
+            t.port = (uint16_t)atoi(text.c_str() + colon + 1);
+        }
+        t.name = t.host;
+        t.persistent = true;
+        ShowPanel(Panel::None);
+        Start(t);
     }
-    t.name = t.host;
-    Start(t);
 }
 
-void SubmitCode() {
-    wchar_t buf[32];
-    GetWindowTextW(g.editCode, buf, 32);
-    std::string digits;
-    for (wchar_t* p = buf; *p; p++)
-        if (*p >= L'0' && *p <= L'9') digits += (char)*p;
-    if (digits.size() != 6) {
-        MessageBeep(MB_ICONWARNING);
+void PanelCancel() {
+    if (g.panel == Panel::Code) {
+        g.userStopped = true;
+        g.session->Disconnect();
+    }
+    ShowPanel(Panel::None);
+}
+
+// ------------------------------------------------------------------------------------ seletor de celular
+
+void RefreshChoices() {
+    g.phones = g.discovery.Phones();
+    Target cur = g.session->CurrentTarget();
+    bool active = g.session->Active();
+
+    g.choices.clear();
+    g.suppressCombo = true;
+    ComboBox_ResetContent(g.combo);
+    int selected = -1;
+    for (auto& p : g.phones) {
+        Bytes key;
+        std::wstring label = Widen(p.name) + L"  [Wi-Fi]" + (g.pairs.Key(p.id, key) ? L"" : L"  • não pareado");
+        if (active && !cur.usb && cur.phoneId == p.id) selected = (int)g.choices.size();
+        g.choices.push_back({Choice::Phone, p});
+        ComboBox_AddString(g.combo, label.c_str());
+    }
+    bool manualIp = active && !cur.usb && cur.phoneId.empty() && !cur.host.empty();
+    if (manualIp) {
+        selected = (int)g.choices.size();
+        g.choices.push_back({Choice::Current, {}});
+        ComboBox_AddString(g.combo, (Widen(cur.host) + L"  [IP]").c_str());
+    }
+    std::wstring usbLabel = active && cur.usb && !cur.name.empty() && cur.name != "celular (USB)"
+                                ? Widen(cur.name) + L"  [USB]"
+                                : std::wstring(L"Celular pelo cabo USB");
+    if (active && cur.usb) selected = (int)g.choices.size();
+    g.choices.push_back({Choice::Usb, {}});
+    ComboBox_AddString(g.combo, usbLabel.c_str());
+    g.choices.push_back({Choice::Ip, {}});
+    ComboBox_AddString(g.combo, L"Conectar pelo IP…");
+    ComboBox_SetCurSel(g.combo, selected);
+    g.suppressCombo = false;
+}
+
+void OnChoice() {
+    int i = ComboBox_GetCurSel(g.combo);
+    if (i < 0 || i >= (int)g.choices.size()) return;
+    const Choice& c = g.choices[i];
+    Target cur = g.session->CurrentTarget();
+    bool active = g.session->Active();
+    if (c.kind == Choice::Phone) {
+        if (active && !cur.usb && cur.phoneId == c.phone.id) return;
+        Target t;
+        t.host = c.phone.ip;
+        t.port = c.phone.port;
+        t.phoneId = c.phone.id;
+        t.name = c.phone.name;
+        Start(t);
+    } else if (c.kind == Choice::Usb) {
+        if (active && cur.usb) return;
+        Target t;
+        t.usb = true;
+        t.name = "celular (USB)";
+        t.persistent = true;
+        Start(t);
+    } else if (c.kind == Choice::Ip) {
+        RefreshChoices();
+        ShowPanel(Panel::Ip);
+    }
+}
+
+// ------------------------------------------------------------------------------------ conexão automática
+
+// Chamado a cada segundo: se nada está conectado, escolhe sozinho USB > celular pareado >
+// único celular não pareado (abre o código uma vez por execução).
+void AutoTick() {
+    if (g.session->Active() || g.userStopped || !g.pairs.AutoConnect() || g.panel != Panel::None) return;
+    ULONGLONG now = GetTickCount64();
+    if (now < g.nextAuto) return;
+    g.nextAuto = now + 2000;
+
+    if (g.usbPresent && now - g.lastUsbFail > 3000) {
+        Target t;
+        t.usb = true;
+        t.name = "celular (USB)";
+        t.automatic = true;
+        Start(t);
         return;
     }
-    g.session->SubmitCode(digits);
-    SetWindowTextW(g.editCode, L"");
+    std::string last = g.pairs.LastPhone();
+    const PhoneInfo* pick = nullptr;
+    for (auto& p : g.phones) {
+        Bytes key;
+        if (!g.pairs.Key(p.id, key)) continue;
+        if (!pick || p.id == last) pick = &p;
+    }
+    if (!pick && g.phones.size() == 1 && !g.autoPairTried.count(g.phones[0].id)) {
+        pick = &g.phones[0];
+        g.autoPairTried.insert(pick->id);
+    }
+    if (!pick) return;
+    Target t;
+    t.host = pick->ip;
+    t.port = pick->port;
+    t.phoneId = pick->id;
+    t.name = pick->name;
+    t.automatic = true;
+    Start(t);
 }
 
-void UpdateCameraLabel() {
-    std::wstring text;
-    if (!g.cameraReady) {
-        text = g.cameraMessage.empty() ? L"Câmera virtual não instalada." : g.cameraMessage;
-        SetWindowTextW(g.btnCamera, L"Instalar câmera");
-    } else {
-        text = L"Câmera virtual \"GodoiCan\" instalada. Escolha-a no Zoom, Teams, Meet ou OBS.";
-        SetWindowTextW(g.btnCamera, L"Reinstalar câmera");
-    }
-    SetWindowTextW(g.lblCamera, text.c_str());
+void StartUsbWatcher() {
+    g.usbThread = std::thread([] {
+        while (!g.quitting) {
+            if (!g.session->Active()) g.usbPresent = sys::AdbDevicePresent();
+            for (int i = 0; i < 30 && !g.quitting; i++) Sleep(100);
+        }
+    });
 }
+
+// ------------------------------------------------------------------------------------ câmera virtual
 
 void SetupCamera(bool force) {
     std::wstring error;
     if (!sys::VCamDllRegistered()) {
         if (!force) {
             g.cameraReady = false;
-            g.cameraMessage = L"Câmera virtual não instalada. Clique em \"Instalar câmera\" (pede administrador).";
-            UpdateCameraLabel();
+            g.cameraMessage = L"Câmera virtual não instalada — menu ☰ → Instalar câmera virtual";
             return;
         }
         if (!sys::RegisterVCamDllElevated(error)) {
             g.cameraReady = false;
             g.cameraMessage = error;
-            UpdateCameraLabel();
             return;
         }
     }
     if (force) sys::RemoveVirtualCamera(error);
     g.cameraReady = sys::EnsureVirtualCamera(error);
     g.cameraMessage = error;
-    UpdateCameraLabel();
 }
 
-void UpdateStatus() {
+// ------------------------------------------------------------------------------------ bandeja
+
+void UpdateTray() {
+    if (!g.trayAdded) return;
     Session::Status s = g.session->GetStatus();
-    std::wstring title = s.title.empty() ? L"Desconectado" : s.title;
-    SetWindowTextW(g.lblStatus, title.c_str());
-    SetWindowTextW(g.lblDetail, s.detail.c_str());
-    bool needCode = s.state == Session::State::NeedCode;
-    EnableWindow(g.editCode, needCode);
-    EnableWindow(g.btnCode, needCode);
-    EnableWindow(g.btnDisconnect, g.session->Active());
-    if (needCode) {
-        SetFocus(g.editCode);
+    NOTIFYICONDATAW nid{sizeof(nid)};
+    nid.hWnd = g.wnd;
+    nid.uID = 1;
+    nid.uFlags = NIF_TIP;
+    std::wstring tip = L"GodoiCan — " + (s.title.empty() ? std::wstring(L"desconectado") : s.title);
+    wcsncpy_s(nid.szTip, tip.c_str(), _TRUNCATE);
+    Shell_NotifyIconW(NIM_MODIFY, &nid);
+}
+
+void AddTray() {
+    NOTIFYICONDATAW nid{sizeof(nid)};
+    nid.hWnd = g.wnd;
+    nid.uID = 1;
+    nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+    nid.uCallbackMessage = WM_APP_TRAY;
+    nid.hIcon = LoadIconW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDI_APP));
+    wcscpy_s(nid.szTip, L"GodoiCan");
+    g.trayAdded = Shell_NotifyIconW(NIM_ADD, &nid);
+}
+
+void RemoveTray() {
+    if (!g.trayAdded) return;
+    NOTIFYICONDATAW nid{sizeof(nid)};
+    nid.hWnd = g.wnd;
+    nid.uID = 1;
+    Shell_NotifyIconW(NIM_DELETE, &nid);
+    g.trayAdded = false;
+}
+
+void ShowFromTray() {
+    ShowWindow(g.wnd, IsIconic(g.wnd) ? SW_RESTORE : SW_SHOW);
+    SetForegroundWindow(g.wnd);
+    Layout();
+}
+
+void HideToTray() {
+    ShowWindow(g.wnd, SW_HIDE);
+    Layout();  // zera o tamanho da prévia: nada de converter imagem sem janela
+    if (g.trayAdded && !g.trayHintShown) {
+        g.trayHintShown = true;
+        NOTIFYICONDATAW nid{sizeof(nid)};
+        nid.hWnd = g.wnd;
+        nid.uID = 1;
+        nid.uFlags = NIF_INFO;
+        wcscpy_s(nid.szInfoTitle, L"O GodoiCan continua ativo");
+        wcscpy_s(nid.szInfo, L"A câmera segue funcionando. Para sair, clique com o botão direito no ícone.");
+        Shell_NotifyIconW(NIM_MODIFY, &nid);
+    }
+}
+
+// ------------------------------------------------------------------------------------ menu ☰
+
+void ShowMainMenu(POINT pt, bool tray) {
+    HMENU m = CreatePopupMenu();
+    bool active = g.session->Active();
+    if (tray) {
+        AppendMenuW(m, MF_STRING, IDM_OPEN, L"Abrir o GodoiCan");
+        AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+    }
+    AppendMenuW(m, MF_STRING, IDM_IP, L"Conectar pelo IP…");
+    AppendMenuW(m, MF_STRING, IDM_USB, L"Conectar pelo cabo USB");
+    AppendMenuW(m, MF_STRING | (active ? 0 : MF_GRAYED), IDM_DISCONNECT, L"Desconectar");
+    AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(m, MF_STRING | (g.pairs.AutoConnect() ? MF_CHECKED : 0), IDM_AUTO, L"Conectar automaticamente");
+    AppendMenuW(m, MF_STRING | (g.blankIdle ? MF_CHECKED : 0), IDM_BLANK, L"Vídeo preto quando desconectado");
+    AppendMenuW(m, MF_STRING | (sys::StartWithWindows() ? MF_CHECKED : 0), IDM_STARTUP, L"Iniciar com o Windows");
+    AppendMenuW(m, MF_STRING | (g.showStats ? MF_CHECKED : 0), IDM_STATS, L"Mostrar estatísticas");
+    AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(m, MF_STRING, IDM_CAMERA, g.cameraReady ? L"Reinstalar câmera virtual" : L"Instalar câmera virtual");
+    AppendMenuW(m, MF_STRING, IDM_FORGET, L"Esquecer celulares pareados");
+    AppendMenuW(m, MF_STRING, IDM_FOLDER, L"Abrir pasta de diagnóstico");
+    AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(m, MF_STRING, IDM_EXIT, L"Sair");
+    SetForegroundWindow(g.wnd);
+    TrackPopupMenu(m, TPM_LEFTALIGN | TPM_TOPALIGN, pt.x, pt.y, 0, g.wnd, nullptr);
+    DestroyMenu(m);
+}
+
+void OnMenu(int id) {
+    switch (id) {
+        case IDM_OPEN:
+            ShowFromTray();
+            break;
+        case IDM_IP:
+            ShowFromTray();
+            ShowPanel(Panel::Ip);
+            break;
+        case IDM_USB: {
+            Target t;
+            t.usb = true;
+            t.name = "celular (USB)";
+            t.persistent = true;
+            Start(t);
+            break;
+        }
+        case IDM_DISCONNECT:
+            g.userStopped = true;
+            g.session->Disconnect();
+            g.preview.clear();
+            break;
+        case IDM_AUTO:
+            g.pairs.SetAutoConnect(!g.pairs.AutoConnect());
+            break;
+        case IDM_BLANK:
+            g.blankIdle = !g.blankIdle;
+            SetPref(L"BlankIdle", g.blankIdle);
+            break;
+        case IDM_STARTUP:
+            sys::SetStartWithWindows(!sys::StartWithWindows());
+            break;
+        case IDM_STATS:
+            g.showStats = !g.showStats;
+            SetPref(L"ShowStats", g.showStats);
+            break;
+        case IDM_CAMERA:
+            SetupCamera(true);
+            if (!g.cameraReady) MessageBoxW(g.wnd, g.cameraMessage.c_str(), L"GodoiCan", MB_ICONWARNING);
+            break;
+        case IDM_FORGET:
+            if (MessageBoxW(g.wnd, L"Esquecer todos os celulares pareados? Será preciso digitar o código de novo.",
+                            L"GodoiCan", MB_YESNO | MB_ICONQUESTION) == IDYES) {
+                g.userStopped = true;
+                g.session->Disconnect();
+                g.pairs.Clear();
+                g.autoPairTried.clear();
+            }
+            break;
+        case IDM_FOLDER: {
+            std::wstring dir = AppDataFile(L"");
+            ShellExecuteW(nullptr, L"open", dir.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+            break;
+        }
+        case IDM_EXIT:
+            DestroyWindow(g.wnd);
+            return;
+    }
+    RefreshChoices();
+    InvalidateRect(g.wnd, nullptr, FALSE);
+}
+
+// ------------------------------------------------------------------------------------ estado
+
+void OnStatus() {
+    Session::Status s = g.session->GetStatus();
+    if (s.state == Session::State::NeedCode && g.panel != Panel::Code) {
+        if (!IsWindowVisible(g.wnd)) ShowFromTray();
+        ShowPanel(Panel::Code);
         FLASHWINFO fi{sizeof(fi), g.wnd, FLASHW_ALL | FLASHW_TIMERNOFG, 3, 0};
         FlashWindowEx(&fi);
+    } else if (s.state != Session::State::NeedCode && g.panel == Panel::Code) {
+        ShowPanel(Panel::None);
     }
-    if (s.state != Session::State::Streaming && s.state != Session::State::Connected) {
+    if (!g.session->Active()) {
+        // Uma tentativa automática pelo USB que nem chegou a conectar: espera antes de tentar de novo.
+        if (g.autoUsbRunning && !g.session->LastRunConnected()) g.lastUsbFail = GetTickCount64();
+        g.autoUsbRunning = false;
         g.preview.clear();
-        InvalidateRect(g.wnd, &g.previewRect, FALSE);
     }
+    RefreshChoices();
+    UpdateTray();
+    InvalidateRect(g.wnd, nullptr, FALSE);
 }
 
-// Reconecta sozinho ao último celular usado (ou ao único pareado) quando ele aparece na rede.
-void AutoConnect() {
-    if (g.userStopped || g.session->Active() || !g.pairs.AutoConnect()) return;
-    std::string last = g.pairs.LastPhone();
-    auto paired = g.pairs.All();
-    for (auto& p : g.phones) {
-        bool isLast = !last.empty() && p.id == last;
-        bool onlyPaired = last.empty() && paired.size() == 1 && paired.count(p.id);
-        if (isLast || onlyPaired) {
-            Target t;
-            t.host = p.ip;
-            t.port = p.port;
-            t.phoneId = p.id;
-            t.name = p.name;
-            g.session->Connect(t);
-            return;
+// ------------------------------------------------------------------------------------ pintura
+
+void DrawLines(HDC dc, const std::wstring& text, RECT r, HFONT font, COLORREF color, UINT flags) {
+    SelectObject(dc, font);
+    SetTextColor(dc, color);
+    DrawTextW(dc, text.c_str(), -1, &r, flags);
+}
+
+void Paint(HDC screen) {
+    RECT rc;
+    GetClientRect(g.wnd, &rc);
+    int w = rc.right, h = rc.bottom;
+    if (w <= 0 || h <= 0) return;
+    HDC dc = CreateCompatibleDC(screen);
+    HBITMAP bmp = CreateCompatibleBitmap(screen, w, h);
+    HGDIOBJ oldBmp = SelectObject(dc, bmp);
+    HGDIOBJ oldFont = SelectObject(dc, g.font);
+    SetBkMode(dc, TRANSPARENT);
+
+    FillRect(dc, &g.barRect, g.barBrush);
+    FillRect(dc, &g.videoRect, g.videoBrush);
+
+    Session::Status s = g.session->GetStatus();
+    bool active = g.session->Active();
+
+    // Barra: estado à direita (ponto colorido + texto curto).
+    COLORREF dot = kMuted;
+    std::wstring state = L"Desconectado";
+    if (active) {
+        switch (s.state) {
+            case Session::State::Streaming:
+                dot = kOk;
+                state = s.brief.empty() ? L"Transmitindo" : s.brief;
+                break;
+            case Session::State::NeedCode:
+                dot = kWait;
+                state = L"Aguardando o código";
+                break;
+            case Session::State::Failed:
+                dot = kBad;
+                state = L"Reconectando…";
+                break;
+            default:
+                dot = kWait;
+                state = L"Conectando…";
         }
     }
-}
+    RECT stateRect = {g.barRect.right - S(300), g.barRect.top, g.barRect.right - S(16), g.barRect.bottom};
+    SelectObject(dc, g.fontSmall);
+    SIZE ts{};
+    GetTextExtentPoint32W(dc, state.c_str(), (int)state.size(), &ts);
+    int dotX = stateRect.right - ts.cx - S(14), dotY = (g.barRect.bottom - S(8)) / 2;
+    HBRUSH dotBrush = CreateSolidBrush(dot);
+    HGDIOBJ oldBrush = SelectObject(dc, dotBrush);
+    HGDIOBJ oldPen = SelectObject(dc, GetStockObject(NULL_PEN));
+    Ellipse(dc, dotX, dotY, dotX + S(8), dotY + S(8));
+    SelectObject(dc, oldPen);
+    SelectObject(dc, oldBrush);
+    DeleteObject(dotBrush);
+    DrawLines(dc, state, stateRect, g.fontSmall, kText, DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
 
-void PaintPreview(HDC dc) {
-    RECT r = g.previewRect;
-    HBRUSH bg = CreateSolidBrush(RGB(22, 24, 29));
-    FillRect(dc, &r, bg);
-    DeleteObject(bg);
-    if (!g.preview.empty() && g.previewW > 0) {
+    RECT v = g.videoRect;
+    int vw = v.right - v.left, vh = v.bottom - v.top;
+    if (!g.preview.empty() && g.previewW > 0 && g.panel == Panel::None) {
         BITMAPINFO bmi{};
         bmi.bmiHeader.biSize = sizeof(bmi.bmiHeader);
         bmi.bmiHeader.biWidth = g.previewW;
@@ -309,23 +625,67 @@ void PaintPreview(HDC dc) {
         bmi.bmiHeader.biPlanes = 1;
         bmi.bmiHeader.biBitCount = 32;
         bmi.bmiHeader.biCompression = BI_RGB;
-        int rw = r.right - r.left, rh = r.bottom - r.top;
-        int dw = rw, dh = rw * g.previewH / g.previewW;
-        if (dh > rh) {
-            dh = rh;
-            dw = rh * g.previewW / g.previewH;
+        int x = v.left + (vw - g.previewW) / 2, y = v.top + (vh - g.previewH) / 2;
+        if (g.previewW <= vw && g.previewH <= vh) {
+            SetDIBitsToDevice(dc, x, y, g.previewW, g.previewH, 0, 0, 0, g.previewH, g.preview.data(), &bmi,
+                              DIB_RGB_COLORS);
+        } else {
+            // A janela encolheu e a próxima prévia ainda não chegou: ajusta esta.
+            int dw = vw, dh = (int)((int64_t)vw * g.previewH / g.previewW);
+            if (dh > vh) {
+                dh = vh;
+                dw = (int)((int64_t)vh * g.previewW / g.previewH);
+            }
+            SetStretchBltMode(dc, HALFTONE);
+            StretchDIBits(dc, v.left + (vw - dw) / 2, v.top + (vh - dh) / 2, dw, dh, 0, 0, g.previewW, g.previewH,
+                          g.preview.data(), &bmi, DIB_RGB_COLORS, SRCCOPY);
         }
-        SetStretchBltMode(dc, HALFTONE);
-        StretchDIBits(dc, r.left + (rw - dw) / 2, r.top + (rh - dh) / 2, dw, dh, 0, 0, g.previewW, g.previewH,
-                      g.preview.data(), &bmi, DIB_RGB_COLORS, SRCCOPY);
-        return;
+        if (g.showStats && !s.stats.empty()) {
+            RECT sr = {v.left + S(12), v.bottom - S(52), v.right - S(12), v.bottom - S(8)};
+            RECT shadow = sr;
+            OffsetRect(&shadow, 1, 1);
+            DrawLines(dc, s.stats, shadow, g.fontSmall, RGB(0, 0, 0), DT_LEFT | DT_BOTTOM);
+            DrawLines(dc, s.stats, sr, g.fontSmall, kText, DT_LEFT | DT_BOTTOM);
+        }
+    } else if (g.panel == Panel::None) {
+        // Tela de espera, no estilo do Iriun: o que está acontecendo e o que fazer.
+        std::wstring title, body;
+        if (active && s.state == Session::State::Failed) {
+            title = s.title;
+            body = s.detail;
+        } else if (active && s.state == Session::State::Connected) {
+            title = s.title;
+            body = L"Aguardando vídeo…";
+        } else if (active) {
+            title = s.title.empty() ? L"Conectando…" : s.title;
+        } else if (g.phones.empty()) {
+            title = L"Nenhum celular encontrado";
+            body = L"Abra o GodoiCan no celular.\n"
+                   L"Celular e PC no mesmo Wi-Fi — ou o cabo USB com a depuração USB ligada.\n"
+                   L"Celulares já pareados conectam sozinhos.";
+        } else {
+            title = g.userStopped ? L"Desconectado" : L"Celular encontrado";
+            body = L"Escolha o celular na lista acima para conectar.";
+        }
+        if (!active && !s.detail.empty() && s.state == Session::State::Failed) body += L"\n\n" + s.detail;
+        RECT tr = {v.left + S(24), v.top + vh / 2 - S(70), v.right - S(24), v.top + vh / 2 - S(30)};
+        DrawLines(dc, title, tr, g.fontTitle, kText, DT_CENTER | DT_BOTTOM | DT_SINGLELINE | DT_END_ELLIPSIS);
+        RECT br = {v.left + S(24), v.top + vh / 2 - S(18), v.right - S(24), v.bottom - S(40)};
+        DrawLines(dc, body, br, g.font, kMuted, DT_CENTER | DT_TOP | DT_WORDBREAK);
+        if (!g.cameraReady && !g.cameraMessage.empty()) {
+            RECT cr = {v.left + S(24), v.bottom - S(36), v.right - S(24), v.bottom - S(10)};
+            DrawLines(dc, g.cameraMessage, cr, g.fontSmall, kWait, DT_CENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        }
     }
-    SetBkMode(dc, TRANSPARENT);
-    SetTextColor(dc, RGB(169, 174, 184));
-    HGDIOBJ old = SelectObject(dc, g.font);
-    DrawTextW(dc, L"A imagem do celular aparece aqui", -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-    SelectObject(dc, old);
+
+    BitBlt(screen, 0, 0, w, h, dc, 0, 0, SRCCOPY);
+    SelectObject(dc, oldFont);
+    SelectObject(dc, oldBmp);
+    DeleteObject(bmp);
+    DeleteDC(dc);
 }
+
+// ------------------------------------------------------------------------------------ janela
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
@@ -333,45 +693,45 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             g.wnd = hwnd;
             g.dpi = GetDpiForWindow(hwnd);
             CreateFonts();
-            g.lblPhones = Make(L"STATIC", L"Celulares na rede", SS_LEFT, 0);
-            g.list = Make(L"LISTBOX", L"", WS_BORDER | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT, ID_LIST);
-            g.btnConnect = Make(L"BUTTON", L"Conectar (Wi-Fi)", BS_DEFPUSHBUTTON, ID_CONNECT);
-            g.btnUsb = Make(L"BUTTON", L"Conectar por USB", BS_PUSHBUTTON, ID_USB);
-            g.lblIp = Make(L"STATIC", L"Ou digite o IP mostrado no celular:", SS_LEFT, 0);
-            g.editIp = Make(L"EDIT", L"", WS_BORDER | ES_AUTOHSCROLL, ID_IP);
-            g.btnIp = Make(L"BUTTON", L"Conectar IP", BS_PUSHBUTTON, ID_IP_GO);
-            g.lblCode = Make(L"STATIC", L"Código de pareamento (aparece no celular):", SS_LEFT, 0);
-            g.editCode = Make(L"EDIT", L"", WS_BORDER | ES_NUMBER | ES_CENTER, ID_CODE);
-            SendMessageW(g.editCode, EM_SETLIMITTEXT, 6, 0);
-            g.btnCode = Make(L"BUTTON", L"Parear", BS_PUSHBUTTON, ID_CODE_GO);
-            g.chkAuto = Make(L"BUTTON", L"Reconectar sozinho ao último celular", BS_AUTOCHECKBOX, ID_AUTO);
-            g.btnDisconnect = Make(L"BUTTON", L"Desconectar", BS_PUSHBUTTON, ID_DISCONNECT);
-            g.lblStatus = Make(L"STATIC", L"Desconectado", SS_LEFT, 0);
-            g.lblDetail = Make(L"STATIC", L"", SS_LEFT, 0);
-            g.lblCamera = Make(L"STATIC", L"", SS_LEFT, 0);
-            g.btnCamera = Make(L"BUTTON", L"Instalar câmera", BS_PUSHBUTTON, ID_CAMERA);
-            g.btnForget = Make(L"BUTTON", L"Esquecer celulares", BS_PUSHBUTTON, ID_FORGET);
+            g.barBrush = CreateSolidBrush(kBar);
+            g.videoBrush = CreateSolidBrush(kVideo);
+            HINSTANCE inst = GetModuleHandleW(nullptr);
+            auto child = [&](const wchar_t* cls, const wchar_t* text, DWORD style, int id) {
+                return CreateWindowExW(0, cls, text, WS_CHILD | style, 0, 0, 10, 10, hwnd, (HMENU)(INT_PTR)id, inst,
+                                       nullptr);
+            };
+            g.btnMenu = child(L"BUTTON", L"☰", WS_VISIBLE | BS_PUSHBUTTON, ID_MENU);
+            g.combo = child(L"COMBOBOX", L"", WS_VISIBLE | WS_VSCROLL | CBS_DROPDOWNLIST, ID_DEVICE);
+            SendMessageW(g.combo, CB_SETCUEBANNER, 0, (LPARAM)L"Escolha o celular");
+            g.panelText = child(L"STATIC", L"", SS_CENTER, ID_PANEL_TEXT);
+            g.panelEdit = child(L"EDIT", L"", WS_BORDER | ES_CENTER | ES_AUTOHSCROLL, ID_PANEL_EDIT);
+            g.panelOk = child(L"BUTTON", L"OK", BS_DEFPUSHBUTTON, ID_PANEL_OK);
+            g.panelCancel = child(L"BUTTON", L"Cancelar", BS_PUSHBUTTON, ID_PANEL_CANCEL);
             ApplyFonts();
-            SendMessageW(g.editIp, EM_SETCUEBANNER, TRUE, (LPARAM)L"ex.: 192.168.0.15");
-            Button_SetCheck(g.chkAuto, g.pairs.AutoConnect() ? BST_CHECKED : BST_UNCHECKED);
 
+            g.showStats = GetPref(L"ShowStats", 0) != 0;
+            g.blankIdle = GetPref(L"BlankIdle", 0) != 0;
             g.session = std::make_unique<Session>(
                 g.pairs, g.writer, [] { PostMessageW(g.wnd, WM_APP_STATUS, 0, 0); },
                 [] { PostMessageW(g.wnd, WM_APP_PREVIEW, 0, 0); });
             g.discovery.Start([] { PostMessageW(g.wnd, WM_APP_DEVICES, 0, 0); });
-            RefreshList();
-            UpdateStatus();
+            StartUsbWatcher();
             SetupCamera(false);
-            SetTimer(hwnd, ID_TIMER, 250, nullptr);
+            AddTray();
+            RefreshChoices();
+            SetTimer(hwnd, TIMER_TICK, 250, nullptr);
             Layout();
             return 0;
         }
         case WM_SIZE:
             Layout();
             return 0;
+        case WM_SHOWWINDOW:
+            PostMessageW(hwnd, WM_SIZE, 0, 0);
+            break;
         case WM_GETMINMAXINFO: {
             auto* mm = (MINMAXINFO*)lp;
-            mm->ptMinTrackSize = {S(860), S(760)};
+            mm->ptMinTrackSize = {S(520), S(360)};
             return 0;
         }
         case WM_DPICHANGED: {
@@ -383,89 +743,80 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                          SWP_NOZORDER | SWP_NOACTIVATE);
             return 0;
         }
-        case WM_CTLCOLORSTATIC: {
-            HDC dc = (HDC)wp;
-            if ((HWND)lp == g.lblStatus) SetTextColor(dc, RGB(20, 22, 26));
-            else if ((HWND)lp == g.lblDetail || (HWND)lp == g.lblCamera) SetTextColor(dc, RGB(90, 96, 106));
-            SetBkColor(dc, GetSysColor(COLOR_WINDOW));
-            return (LRESULT)GetSysColorBrush(COLOR_WINDOW);
-        }
-        case WM_COMMAND:
-            switch (LOWORD(wp)) {
-                case ID_CONNECT:
-                    ConnectSelected();
-                    break;
-                case ID_LIST:
-                    if (HIWORD(wp) == LBN_DBLCLK) ConnectSelected();
-                    break;
-                case ID_USB:
-                    ConnectUsb();
-                    break;
-                case ID_IP_GO:
-                    ConnectIp();
-                    break;
-                case ID_CODE_GO:
-                    SubmitCode();
-                    break;
-                case ID_AUTO:
-                    g.pairs.SetAutoConnect(Button_GetCheck(g.chkAuto) == BST_CHECKED);
-                    break;
-                case ID_DISCONNECT:
-                    g.userStopped = true;
-                    g.session->Disconnect();
-                    break;
-                case ID_CAMERA:
-                    SetupCamera(true);
-                    break;
-                case ID_FORGET:
-                    if (MessageBoxW(hwnd, L"Esquecer todos os celulares pareados? Será preciso parear de novo.",
-                                    L"GodoiCan", MB_YESNO | MB_ICONQUESTION) == IDYES) {
-                        g.userStopped = true;
-                        g.session->Disconnect();
-                        g.pairs.Clear();
-                        RefreshList();
-                    }
-                    break;
+        case WM_CTLCOLORSTATIC:
+            if ((HWND)lp == g.panelText) {
+                SetTextColor((HDC)wp, kText);
+                SetBkColor((HDC)wp, kVideo);
+                return (LRESULT)g.videoBrush;
+            }
+            break;
+        case WM_COMMAND: {
+            int id = LOWORD(wp);
+            if (id == ID_DEVICE && HIWORD(wp) == CBN_SELCHANGE && !g.suppressCombo) {
+                OnChoice();
+            } else if (id == ID_MENU) {
+                RECT r;
+                GetWindowRect(g.btnMenu, &r);
+                ShowMainMenu({r.left, r.bottom}, false);
+            } else if (id == ID_PANEL_OK) {
+                PanelOk();
+            } else if (id == ID_PANEL_CANCEL) {
+                PanelCancel();
+            } else if (id >= IDM_IP && id <= IDM_EXIT) {
+                OnMenu(id);
             }
             return 0;
+        }
         case WM_APP_STATUS:
-            UpdateStatus();
+            OnStatus();
             return 0;
         case WM_APP_PREVIEW:
-            if (g.session->TakePreview(g.preview, g.previewW, g.previewH))
-                InvalidateRect(hwnd, &g.previewRect, FALSE);
+            if (g.session->TakePreview(g.preview, g.previewW, g.previewH)) InvalidateRect(hwnd, &g.videoRect, FALSE);
             return 0;
         case WM_APP_DEVICES:
-            RefreshList();
-            AutoConnect();
+            RefreshChoices();
+            AutoTick();
+            InvalidateRect(hwnd, nullptr, FALSE);
             return 0;
-        case WM_TIMER:
-            g.writer.Heartbeat(g.session->Streaming());
+        case WM_APP_TRAY:
+            if (LOWORD(lp) == WM_LBUTTONUP || LOWORD(lp) == WM_LBUTTONDBLCLK) {
+                ShowFromTray();
+            } else if (LOWORD(lp) == WM_RBUTTONUP || LOWORD(lp) == WM_CONTEXTMENU) {
+                POINT pt;
+                GetCursorPos(&pt);
+                ShowMainMenu(pt, true);
+            }
             return 0;
-        case WM_ERASEBKGND: {
-            RECT rc;
-            GetClientRect(hwnd, &rc);
-            HRGN all = CreateRectRgnIndirect(&rc), prev = CreateRectRgnIndirect(&g.previewRect);
-            CombineRgn(all, all, prev, RGN_DIFF);
-            FillRgn((HDC)wp, all, GetSysColorBrush(COLOR_WINDOW));
-            DeleteObject(all);
-            DeleteObject(prev);
-            return 1;
+        case WM_TIMER: {
+            // Segura o "transmitindo" por 3 s em quedas curtas: a câmera virtual mantém o último quadro.
+            bool streaming = g.session->Streaming() || (g.session->Active() && g.session->RecentlyStreaming(3000));
+            g.writer.Heartbeat(streaming, g.blankIdle ? GDC_FLAG_BLANK_WHEN_IDLE : 0);
+            static int ticks = 0;
+            if (++ticks % 4 == 0) AutoTick();
+            return 0;
         }
+        case WM_ERASEBKGND:
+            return 1;  // tudo é pintado no WM_PAINT, com buffer duplo
         case WM_PAINT: {
             PAINTSTRUCT ps;
             HDC dc = BeginPaint(hwnd, &ps);
-            PaintPreview(dc);
+            Paint(dc);
             EndPaint(hwnd, &ps);
             return 0;
         }
-        case WM_KEYDOWN:
-            if (wp == VK_RETURN && GetFocus() == g.editCode) SubmitCode();
-            return 0;
+        case WM_CLOSE:
+            if (g.trayAdded) {
+                HideToTray();
+                return 0;
+            }
+            break;
         case WM_DESTROY:
-            KillTimer(hwnd, ID_TIMER);
+            KillTimer(hwnd, TIMER_TICK);
+            g.quitting = true;
+            if (g.usbThread.joinable()) g.usbThread.join();
             g.session.reset();
             g.discovery.Stop();
+            RemoveTray();
             PostQuitMessage(0);
             return 0;
     }
@@ -478,7 +829,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
     int argc = 0;
     LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     std::wstring startIp;
-    bool startUsb = false;
+    bool startUsb = false, minimized = false;
     for (int i = 1; i < argc; i++) {
         std::wstring a = argv[i];
         if (a == L"--remove-camera") {
@@ -492,6 +843,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
             return ok ? 0 : 1;
         }
         if (a == L"--usb") startUsb = true;
+        if (a == L"--minimized") minimized = true;
         if (a == L"--ip" && i + 1 < argc) startIp = argv[++i];
     }
     LocalFree(argv);
@@ -499,6 +851,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
     HANDLE single = CreateMutexW(nullptr, TRUE, L"Local\\GodoiCanApp");
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
         if (HWND other = FindWindowW(L"GodoiCanWindow", nullptr)) {
+            ShowWindow(other, SW_SHOW);
             ShowWindow(other, SW_RESTORE);
             SetForegroundWindow(other);
         }
@@ -523,30 +876,32 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
     RegisterClassExW(&wc);
 
     UINT dpi = GetDpiForSystem();
-    HWND hwnd = CreateWindowExW(0, wc.lpszClassName, L"GodoiCan", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
-                                MulDiv(1120, dpi, 96), MulDiv(780, dpi, 96), nullptr, nullptr, inst, nullptr);
-    ShowWindow(hwnd, show);
+    HWND hwnd = CreateWindowExW(0, wc.lpszClassName, L"GodoiCan", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
+                                CW_USEDEFAULT, CW_USEDEFAULT, MulDiv(980, dpi, 96), MulDiv(620, dpi, 96), nullptr,
+                                nullptr, inst, nullptr);
+    if (!minimized) ShowWindow(hwnd, show);
     if (startUsb) {
-        ConnectUsb();
+        OnMenu(IDM_USB);
     } else if (!startIp.empty()) {
-        SetWindowTextW(g.editIp, startIp.c_str());
-        ConnectIp();
+        Target t;
+        t.host = Narrow(startIp);
+        t.name = t.host;
+        t.persistent = true;
+        Start(t);
     }
 
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0)) {
-        // Enter no campo do código confirma; Tab navega entre os controles.
-        if (msg.message == WM_KEYDOWN && msg.wParam == VK_RETURN) {
-            if (msg.hwnd == g.editCode) {
-                SubmitCode();
+        if (msg.message == WM_KEYDOWN && msg.hwnd == g.panelEdit) {
+            if (msg.wParam == VK_RETURN) {
+                PanelOk();
                 continue;
             }
-            if (msg.hwnd == g.editIp) {
-                ConnectIp();
+            if (msg.wParam == VK_ESCAPE) {
+                PanelCancel();
                 continue;
             }
         }
-        if (IsDialogMessageW(hwnd, &msg)) continue;
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }

@@ -30,6 +30,28 @@ Base para comparar cada melhoria das próximas fases. Tudo medido no **Samsung S
 - Encoder usado: `c2.exynos.h264.encoder` (hardware), 1920×1080 a 30 fps, ~10 Mbps (qualidade "Alta").
 - Emulador (referência, encoder em software): 25 fps, atraso captura→PC ~69 ms, RTT 7 ms.
 
+### S24 real, Wi‑Fi, 1080p30 "Alta" — 23/10/2026 18:34 (20 s de `stats.csv`)
+
+| Etapa | Média | Mín–máx |
+|---|---|---|
+| FPS enviado / recebido no PC | 29,1 / 29,1 | 17–31 |
+| Bitrate real | 9,4 Mbps | 4,9–10,8 |
+| **Captura → saída do encoder (celular)** | **86 ms** | 65–97 |
+| Rede (RTT) | 7 ms | 3–15 |
+| Decodificação no PC (software) | 9,9 ms | 7,8–11,9 |
+| **Captura → decodificado no PC** | **100 ms** | 78–112 |
+| Temperatura da bateria | 37,0 °C | — |
+| Quadros descartados | 0 | — |
+
+**Conclusão:** quase todo o atraso está no celular, entre a exposição do sensor e a saída do encoder (86 de 100 ms). Rede e PC somam ~15 ms. A Fase 5 deve atacar primeiro o encoder e o pipeline da câmera.
+
+### Relatório do S24 (resumo)
+
+- Android 16 (API 36), Exynos 2400 (s5e9945).
+- Câmeras: traseira principal (id 0, zoom 0,6×–10× via câmera lógica com físicas 2/5/6), ultra‑angular (id 2), frontal (ids 1 e 3).
+- 1080p e 720p até 60 fps; 1440p e 4K até 30 fps; relógio REALTIME (o atraso medido é confiável).
+- Encoders de hardware: `c2.exynos.h264.encoder`, `c2.exynos.hevc.encoder` e as variantes **`.wfd`** (feitas para espelhamento de tela, normalmente de baixa latência). Nenhum anuncia `FEATURE_LowLatency` nem intra‑refresh. Suportam VBR e CBR até 240 Mbps.
+
 ### Vidro a vidro (preencher)
 
 | Cenário | GodoiCan p50 | GodoiCan p95 | Iriun p50 | Iriun p95 |

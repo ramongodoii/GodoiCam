@@ -29,6 +29,8 @@ Legenda: **[Falta]** recurso ausente · **[Melhorar]** existe mas está ruim · 
 
 ## Fase 0 — Medir antes de mexer
 
+> **Status (23/10/2026): feita.** Ferramentas e primeiros números em `docs/MEDICOES.md`. Falta só a comparação vidro a vidro com o Iriun (precisa do celular apontado para a tela).
+
 Sem números não dá para saber se uma mudança melhorou o atraso ou a qualidade.
 
 - **[Falta]** Tela/linha de diagnóstico ligável (celular e PC): FPS da câmera, FPS enviado, bitrate real, quadros descartados, tempo de encode, RTT, atraso estimado, temperatura do celular.
@@ -43,6 +45,15 @@ Sem números não dá para saber se uma mudança melhorou o atraso ou a qualidad
 
 ## Fase 1 — Conexão sem cliques (estilo Iriun)
 
+> **Status (23/10/2026): feita, testada no emulador.**
+> - O PC conecta sozinho a qualquer celular pareado (USB > último usado > outro pareado), sem clique.
+> - Celular não pareado sozinho na rede: o PC abre a tela do código uma vez.
+> - Cabo USB detectado sozinho (`adb devices` a cada 3 s).
+> - O celular se anuncia na rede a cada 2 s enquanto espera um PC; o PC reage na hora.
+> - Queda curta: a câmera virtual segura o último quadro por 3 s e a sessão reconecta.
+> - Testado: reconexão depois de reiniciar o app do celular; pareamento novo pela tela do PC.
+> - **Pendente:** trocar de Wi‑Fi para USB sozinho quando o cabo é ligado no meio da transmissão; testar o anúncio no S24 real.
+
 - **[Melhorar]** PC conecta sozinho a qualquer celular **pareado** que aparecer na rede ou no USB, sem depender de "último celular".
 - **[Melhorar]** Primeiro pareamento sem botão: ao achar um celular não pareado, o PC já abre a etapa do código (campo grande, foco automático). No celular, o código aparece em tela cheia.
 - **[Falta]** Detectar o cabo USB sozinho (`adb devices` periódico ou aviso de dispositivo) e preferir USB quando houver.
@@ -56,6 +67,14 @@ Sem números não dá para saber se uma mudança melhorou o atraso ou a qualidad
 ---
 
 ## Fase 2 — Interface do PC
+
+> **Status (23/10/2026): feita.**
+> - Janela = vídeo, redimensionável, buffer duplo (sem piscar). A prévia é gerada no tamanho exato da janela (bilinear), não mais 640 px.
+> - Barra fina: menu ☰ + seletor ("S24 de Ramon [Wi‑Fi]", "[USB]", "Conectar pelo IP…") + estado com ponto colorido.
+> - Tela de espera no estilo do Iriun; código de pareamento e IP num painel central.
+> - Menu ☰: IP, USB, desconectar, conectar automaticamente, vídeo preto sem conexão, iniciar com o Windows, estatísticas na tela, (re)instalar câmera, esquecer celulares, pasta de diagnóstico, sair.
+> - Fechar a janela deixa o app na bandeja; "Iniciar com o Windows" abre minimizado.
+> - **Pendente:** desenho por GPU (Direct2D/D3D) se a CPU pesar em 4K; teste em monitor com escala 150%/200%.
 
 - **[Melhorar]** Janela = vídeo. Ocupa toda a área, mantém proporção e redimensiona livremente. Desenho com buffer duplo (sem piscar).
 - **[Melhorar]** Prévia em resolução cheia (ou proporcional ao tamanho da janela), não 640 px. Avaliar desenhar com Direct3D/Direct2D em vez de GDI.

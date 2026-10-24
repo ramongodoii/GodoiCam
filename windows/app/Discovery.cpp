@@ -60,15 +60,21 @@ void Discovery::Run() {
     setsockopt(s, SOL_SOCKET, SO_BROADCAST, (const char*)&yes, sizeof(yes));
     DWORD timeout = 250;
     setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
+    // Escuta na porta do protocolo para também ouvir os anúncios que o celular faz sozinho.
+    setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const char*)&yes, sizeof(yes));
     sockaddr_in local{};
     local.sin_family = AF_INET;
-    bind(s, (sockaddr*)&local, sizeof(local));
+    local.sin_port = htons(proto::UDP_PORT);
+    if (bind(s, (sockaddr*)&local, sizeof(local)) != 0) {
+        local.sin_port = 0;
+        bind(s, (sockaddr*)&local, sizeof(local));
+    }
 
     const char request[] = "GDCN?1";
     ULONGLONG lastSend = 0;
     while (!m_stop) {
         ULONGLONG now = GetTickCount64();
-        if (now - lastSend >= 2000) {
+        if (now - lastSend >= 1500) {
             lastSend = now;
             for (ULONG addr : BroadcastAddresses()) {
                 sockaddr_in to{};

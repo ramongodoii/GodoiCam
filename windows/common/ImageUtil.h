@@ -130,6 +130,39 @@ inline void NV12ToBGRANearest(const uint8_t* sy, int syPitch, const uint8_t* suv
     }
 }
 
+// NV12 → BGRA em outro tamanho: luma bilinear (nitidez), croma do vizinho mais próximo.
+inline void NV12ToBGRABilinear(const uint8_t* sy, int syPitch, const uint8_t* suv, int suvPitch, int sw, int sh,
+                               uint8_t* dst, int dPitch, int dw, int dh) {
+    Axis ax, ay;
+    ax.Build(sw, dw);
+    ay.Build(sh, dh);
+    for (int y = 0; y < dh; y++) {
+        int iy = ay.index[y], wy = ay.weight[y];
+        const uint8_t* r0 = sy + (size_t)iy * syPitch;
+        const uint8_t* r1 = sh > 1 ? r0 + syPitch : r0;
+        int cy = (iy + (wy >= 128 ? 1 : 0)) / 2;
+        if (cy > sh / 2 - 1) cy = sh / 2 - 1;
+        const uint8_t* ruv = suv + (size_t)cy * suvPitch;
+        uint8_t* out = dst + (size_t)y * dPitch;
+        for (int x = 0; x < dw; x++) {
+            int ix = ax.index[x], wx = ax.weight[x];
+            int ix1 = sw > 1 ? ix + 1 : ix;
+            int top = r0[ix] * (256 - wx) + r0[ix1] * wx;
+            int bot = r1[ix] * (256 - wx) + r1[ix1] * wx;
+            int luma = (top * (256 - wy) + bot * wy + 32768) >> 16;
+            int cx = (ix + (wx >= 128 ? 1 : 0)) & ~1;
+            if (cx > sw - 2) cx = sw - 2;
+            int c = (luma - 16) * 298;
+            int u = ruv[cx] - 128;
+            int v = ruv[cx + 1] - 128;
+            out[x * 4 + 0] = Clamp8((c + 541 * u + 128) >> 8);
+            out[x * 4 + 1] = Clamp8((c - 55 * u - 136 * v + 128) >> 8);
+            out[x * 4 + 2] = Clamp8((c + 459 * v + 128) >> 8);
+            out[x * 4 + 3] = 255;
+        }
+    }
+}
+
 // BGRA → NV12 (BT.709, faixa limitada), mesmo tamanho. Usado só para a tela de espera.
 inline void BGRAToNV12(const uint8_t* src, int sPitch, int w, int h, uint8_t* dy, int dyPitch, uint8_t* duv,
                        int duvPitch) {

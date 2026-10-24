@@ -22,6 +22,10 @@ struct Target {
     uint16_t port = proto::TCP_PORT;
     std::string phoneId;  // pode ser vazio (USB ou IP manual)
     std::string name;
+    // Persistente: reconecta para sempre (USB/IP escolhidos pelo usuário). Senão desiste
+    // logo e deixa a conexão automática escolher de novo quando o celular reaparecer.
+    bool persistent = false;
+    bool automatic = false;
 };
 
 class Session {
@@ -33,6 +37,8 @@ public:
         std::wstring title;
         std::wstring detail;
         std::wstring phoneName;
+        std::wstring brief;  // ex.: "1920×1080 • 30 fps • 98 ms"
+        std::wstring stats;  // linha completa de estatísticas
     };
 
     Session(PairStore& pairs, FrameWriter& writer, std::function<void()> onStatus, std::function<void()> onPreview);
@@ -43,8 +49,17 @@ public:
     void SubmitCode(const std::string& code);
 
     Status GetStatus();
-    bool Active() const { return m_thread.joinable() && !m_stopping; }
+    bool Active() const { return m_running && !m_stopping; }
     bool Streaming() const { return m_streaming; }
+    // Recebeu vídeo nos últimos `ms` (para segurar a imagem durante quedas curtas).
+    bool RecentlyStreaming(ULONGLONG ms) const { return GetTickCount64() - m_lastFrameTick < ms; }
+    // A última tentativa chegou a autenticar com o celular?
+    bool LastRunConnected() const { return m_connectedOnce; }
+    // Tamanho máximo da prévia (área de vídeo da janela); 0 desliga a prévia.
+    void SetPreviewSize(int width, int height) {
+        m_previewMaxW = width;
+        m_previewMaxH = height;
+    }
     Target CurrentTarget();
 
     // Copia a prévia BGRA mais recente; falso se não há nada novo.
@@ -58,6 +73,7 @@ private:
     bool Handshake(Conn& conn, bool& forcePair, Outcome& outcome, std::string& phoneId, std::string& phoneName);
     void Receive(Conn& conn, const std::string& phoneName);
     void SetStatus(State state, const std::wstring& title, const std::wstring& detail = L"");
+    void SetStats(const std::wstring& brief, const std::wstring& stats);
     bool WaitStop(DWORD ms);
     static int64_t NowUs();
 
@@ -69,6 +85,11 @@ private:
     std::thread m_thread;
     std::atomic<bool> m_stopping{false};
     std::atomic<bool> m_streaming{false};
+    std::atomic<bool> m_running{false};
+    std::atomic<bool> m_connectedOnce{false};
+    std::atomic<ULONGLONG> m_lastFrameTick{0};
+    std::atomic<int> m_previewMaxW{0};
+    std::atomic<int> m_previewMaxH{0};
     HANDLE m_wake = nullptr;  // desconectar
     HANDLE m_codeReady = nullptr;
     std::mutex m_lock;

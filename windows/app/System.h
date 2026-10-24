@@ -17,6 +17,12 @@ bool RemoveVirtualCamera(std::wstring& error);
 std::wstring FindAdb();
 // adb forward tcp:47180 tcp:47180. Devolve falso com a mensagem do adb.
 bool AdbForward(std::wstring& error);
+// Há um aparelho autorizado no `adb devices`? (rápido; falso se não houver adb)
+bool AdbDevicePresent();
+
+// "Iniciar com o Windows" (HKCU\...\Run), iniciando minimizado na bandeja.
+bool StartWithWindows();
+void SetStartWithWindows(bool on);
 
 std::wstring ExeDir();
 std::string ComputerName();

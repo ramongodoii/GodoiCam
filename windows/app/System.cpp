@@ -126,18 +126,14 @@ std::wstring FindAdb() {
     return {};
 }
 
-bool AdbForward(std::wstring& error) {
-    std::wstring adb = FindAdb();
-    if (adb.empty()) {
-        error = L"adb.exe não encontrado. Coloque a pasta platform-tools em \"adb\" ao lado do GodoiCan.exe.";
-        return false;
-    }
+// Executa um programa sem janela e captura stdout+stderr.
+static bool RunCapture(const std::wstring& exe, const std::wstring& args, std::string& output, DWORD& code,
+                       DWORD timeoutMs) {
     SECURITY_ATTRIBUTES sa{sizeof(sa), nullptr, TRUE};
     HANDLE readPipe = nullptr, writePipe = nullptr;
-    CreatePipe(&readPipe, &writePipe, &sa, 0);
+    if (!CreatePipe(&readPipe, &writePipe, &sa, 0)) return false;
     SetHandleInformation(readPipe, HANDLE_FLAG_INHERIT, 0);
-
-    std::wstring cmd = L"\"" + adb + L"\" forward tcp:47180 tcp:47180";
+    std::wstring cmd = L"\"" + exe + L"\" " + args;
     STARTUPINFOW si{sizeof(si)};
     si.dwFlags = STARTF_USESTDHANDLES;
     si.hStdOutput = writePipe;
@@ -148,21 +144,33 @@ bool AdbForward(std::wstring& error) {
     CloseHandle(writePipe);
     if (!started) {
         CloseHandle(readPipe);
-        error = L"Não foi possível executar o adb.";
         return false;
     }
-    std::string output;
     char buf[512];
     DWORD n = 0;
     while (ReadFile(readPipe, buf, sizeof(buf), &n, nullptr) && n > 0) output.append(buf, n);
     CloseHandle(readPipe);
-    WaitForSingleObject(pi.hProcess, 15000);
-    DWORD code = 1;
+    WaitForSingleObject(pi.hProcess, timeoutMs);
+    code = 1;
     GetExitCodeProcess(pi.hProcess, &code);
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
-    if (code == 0) return true;
+    return true;
+}
 
+bool AdbForward(std::wstring& error) {
+    std::wstring adb = FindAdb();
+    if (adb.empty()) {
+        error = L"adb.exe não encontrado. Coloque a pasta platform-tools em \"adb\" ao lado do GodoiCan.exe.";
+        return false;
+    }
+    std::string output;
+    DWORD code = 1;
+    if (!RunCapture(adb, L"forward tcp:47180 tcp:47180", output, code, 15000)) {
+        error = L"Não foi possível executar o adb.";
+        return false;
+    }
+    if (code == 0) return true;
     if (output.find("no devices") != std::string::npos)
         error = L"Nenhum celular no USB. Conecte o cabo e ative a Depuração USB.";
     else if (output.find("unauthorized") != std::string::npos)
@@ -172,6 +180,47 @@ bool AdbForward(std::wstring& error) {
     else
         error = L"adb: " + Widen(output);
     return false;
+}
+
+bool AdbDevicePresent() {
+    static std::wstring adb = FindAdb();
+    if (adb.empty()) return false;
+    std::string output;
+    DWORD code = 1;
+    if (!RunCapture(adb, L"devices", output, code, 5000) || code != 0) return false;
+    // Linhas "serial<TAB>device"; ignora "unauthorized" e "offline".
+    size_t pos = 0;
+    while ((pos = output.find("\tdevice", pos)) != std::string::npos) {
+        size_t end = pos + 7;
+        if (end >= output.size() || output[end] == '\r' || output[end] == '\n') return true;
+        pos = end;
+    }
+    return false;
+}
+
+static const wchar_t kRunKey[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+
+bool StartWithWindows() {
+    HKEY key;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, kRunKey, 0, KEY_READ, &key) != ERROR_SUCCESS) return false;
+    bool on = RegQueryValueExW(key, L"GodoiCan", nullptr, nullptr, nullptr, nullptr) == ERROR_SUCCESS;
+    RegCloseKey(key);
+    return on;
+}
+
+void SetStartWithWindows(bool on) {
+    HKEY key;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, kRunKey, 0, KEY_SET_VALUE, &key) != ERROR_SUCCESS) return;
+    if (on) {
+        wchar_t path[MAX_PATH];
+        GetModuleFileNameW(nullptr, path, MAX_PATH);
+        std::wstring value = L"\"" + std::wstring(path) + L"\" --minimized";
+        RegSetValueExW(key, L"GodoiCan", 0, REG_SZ, (const BYTE*)value.c_str(),
+                       (DWORD)((value.size() + 1) * sizeof(wchar_t)));
+    } else {
+        RegDeleteValueW(key, L"GodoiCan");
+    }
+    RegCloseKey(key);
 }
 
 }  // namespace sys

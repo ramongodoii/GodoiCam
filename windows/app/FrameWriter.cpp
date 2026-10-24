@@ -32,11 +32,12 @@ bool FrameWriter::OpenLocked() {
     return true;
 }
 
-void FrameWriter::Heartbeat(bool streaming) {
+void FrameWriter::Heartbeat(bool streaming, LONG flags) {
     std::lock_guard<std::mutex> lock(m_lock);
     if (!OpenLocked()) return;
     InterlockedExchange64(&m_shared->writerTick, (LONG64)GetTickCount64());
     InterlockedExchange(&m_shared->state, streaming ? GDC_STATE_STREAMING : GDC_STATE_IDLE);
+    InterlockedExchange(&m_shared->flags, flags);
     if (!streaming && m_event) SetEvent(m_event);  // acorda a câmera para trocar para a tela de espera
 }
 

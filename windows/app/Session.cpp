@@ -50,6 +50,15 @@ void Session::SetStatus(State state, const std::wstring& title, const std::wstri
     if (m_onStatus) m_onStatus();
 }
 
+void Session::SetStats(const std::wstring& brief, const std::wstring& stats) {
+    {
+        std::lock_guard<std::mutex> lock(m_lock);
+        m_status.brief = brief;
+        m_status.stats = stats;
+    }
+    if (m_onStatus) m_onStatus();
+}
+
 Session::Status Session::GetStatus() {
     std::lock_guard<std::mutex> lock(m_lock);
     return m_status;
@@ -71,6 +80,8 @@ void Session::Connect(const Target& target) {
         m_status.phoneName = Widen(target.name);
     }
     m_stopping = false;
+    m_connectedOnce = false;
+    m_running = true;
     ResetEvent(m_wake);
     m_thread = std::thread([this, target] { Run(target); });
 }
@@ -88,6 +99,7 @@ void Session::Disconnect() {
     }
     m_thread.join();
     m_streaming = false;
+    m_running = false;
     SetStatus(State::Idle, L"Desconectado");
 }
 
@@ -116,13 +128,20 @@ void Session::Run(Target target) {
     bool forcePair = false;
     int failures = 0;
     while (!m_stopping) {
+        bool wasConnected = m_connectedOnce;
         Outcome o = RunOnce(target, forcePair);
         m_streaming = false;
         if (m_stopping || o == Outcome::Stop) break;
         if (o == Outcome::RetryNow) continue;
-        failures = std::min(failures + 1, 5);
-        if (WaitStop(1000u * failures)) break;  // 1 s, 2 s ... até 5 s
+        if (m_connectedOnce && !wasConnected) failures = 0;  // a sessão chegou a funcionar
+        failures++;
+        // Alvos não persistentes desistem cedo: a conexão automática escolhe de novo (outra
+        // rota, outro celular) assim que o aparelho reaparecer.
+        if (!target.persistent && failures >= (m_connectedOnce ? 4 : 1)) break;
+        if (WaitStop(1000u * std::min(failures, 5))) break;
     }
+    m_running = false;
+    if (m_onStatus) m_onStatus();
 }
 
 Session::Outcome Session::RunOnce(const Target& target, bool& forcePair) {
@@ -163,6 +182,7 @@ Session::Outcome Session::RunOnce(const Target& target, bool& forcePair) {
     std::string phoneId, phoneName;
     if (!Handshake(conn, forcePair, outcome, phoneId, phoneName)) return outcome;
     forcePair = false;
+    m_connectedOnce = true;
     m_pairs.SetLastPhone(phoneId);
     {
         std::lock_guard<std::mutex> lock(m_lock);
@@ -358,20 +378,27 @@ void Session::Receive(Conn& conn, const std::string& phoneName) {
     auto onFrame = [&](const DecodedFrame& f) {
         m_writer.Write(f.y, f.yPitch, f.uv, f.uvPitch, f.width, f.height);
         m_streaming = true;
+        m_lastFrameTick = GetTickCount64();
         frames++;
         int64_t latency = NowUs() + m_clockOffset - f.ptsUs;
         if (m_bestRtt != INT64_MAX && latency > 0 && latency < 5000000) {
             latencySum += latency;
             latencyCount++;
         }
-        // Prévia pequena para a janela; só gera se a anterior já foi consumida.
-        if (!m_previewPosted) {
-            int pw = 640, ph = f.width > 0 ? (int)((int64_t)640 * f.height / f.width) : 360;
+        // Prévia no tamanho exato da área de vídeo da janela (a janela só copia, sem esticar).
+        // Só gera se a anterior já foi desenhada e a janela está visível.
+        int maxW = m_previewMaxW, maxH = m_previewMaxH;
+        if (!m_previewPosted && maxW > 16 && maxH > 16 && f.width > 0 && f.height > 0) {
+            int pw = maxW, ph = (int)((int64_t)maxW * f.height / f.width);
+            if (ph > maxH) {
+                ph = maxH;
+                pw = (int)((int64_t)maxH * f.width / f.height);
+            }
             {
                 std::lock_guard<std::mutex> lock(m_previewLock);
                 m_preview.resize((size_t)pw * ph * 4);
-                img::NV12ToBGRANearest(f.y, f.yPitch, f.uv, f.uvPitch, f.width, f.height, m_preview.data(), pw * 4,
-                                       pw, ph);
+                img::NV12ToBGRABilinear(f.y, f.yPitch, f.uv, f.uvPitch, f.width, f.height, m_preview.data(),
+                                        pw * 4, pw, ph);
                 m_previewW = pw;
                 m_previewH = ph;
                 m_previewNew = true;
@@ -460,15 +487,20 @@ void Session::Receive(Conn& conn, const std::string& phoneName) {
         int64_t now = NowUs();
         if (now - windowStart >= 1000000) {
             double secs = (now - windowStart) / 1e6;
-            wchar_t detail[256];
             if (frames > 0) {
-                swprintf_s(detail, L"%d×%d • %.0f fps • %.1f Mbps • atraso ~%d ms • rede %d ms\n%s", cfgW, cfgH,
-                           frames / secs, bytes * 8 / secs / 1e6,
-                           latencyCount ? (int)(latencySum / latencyCount / 1000) : 0, (int)(m_rtt / 1000),
-                           m_writer.CameraInUse() ? L"Câmera virtual em uso por um aplicativo"
-                                                  : L"Câmera virtual pronta (nenhum app usando agora)");
-                SetStatus(State::Streaming, L"Transmitindo de " + wname, detail);
-            } else {
+                int latencyMs = latencyCount ? (int)(latencySum / latencyCount / 1000) : 0;
+                wchar_t brief[128], stats[512];
+                swprintf_s(brief, L"%d×%d • %.0f fps • %d ms", cfgW, cfgH, frames / secs, latencyMs);
+                swprintf_s(stats,
+                           L"Celular: câmera %d fps • enviando %d fps • %.1f Mbps • codificação %d ms • %.1f °C\n"
+                           L"PC: %.0f fps • decodificação %.1f ms • atraso captura→PC %d ms • rede %d ms • "
+                           L"câmera virtual %s",
+                           phone.camFps, phone.encFps, phone.bits / 1e6, phone.encodeMs, phone.tempTenths / 10.0,
+                           frames / secs, decodeCount ? decodeSum / 1000.0 / decodeCount : 0.0, latencyMs,
+                           (int)(m_rtt / 1000), m_writer.CameraInUse() ? L"em uso" : L"livre");
+                if (GetStatus().state != State::Streaming) SetStatus(State::Streaming, L"Transmitindo de " + wname);
+                SetStats(brief, stats);
+            } else if (GetStatus().state != State::Connected) {
                 SetStatus(State::Connected, L"Conectado a " + wname, L"Aguardando vídeo…");
             }
             if (csv) {

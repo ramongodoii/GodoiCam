@@ -18,7 +18,7 @@ if not exist bin mkdir bin
 if not exist obj\vcam mkdir obj\vcam
 if not exist obj\app mkdir obj\app
 
-set CFLAGS=/nologo /std:c++17 /O2 /EHsc /W3 /MT /utf-8 /DUNICODE /D_UNICODE /DWIN32_LEAN_AND_MEAN /DNOMINMAX /Icommon
+set CFLAGS=/nologo /std:c++17 /O2 /EHsc /W3 /MT /utf-8 /D_CRT_SECURE_NO_WARNINGS /DUNICODE /D_UNICODE /DWIN32_LEAN_AND_MEAN /DNOMINMAX /Icommon
 
 echo [1/2] GodoiCanVCam.dll
 cl %CFLAGS% /LD vcam\*.cpp /Fo"obj\vcam\\" /Fe"bin\GodoiCanVCam.dll" ^

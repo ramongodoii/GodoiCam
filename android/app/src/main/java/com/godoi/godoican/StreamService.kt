@@ -380,6 +380,7 @@ class StreamService : Service(), StreamServer.Callbacks, ClientSession.Listener,
         ctrl.post {
             this.session?.takeIf { it !== session }?.close()
             this.session = session
+            discovery?.announce = false
             session.listener = this
             session.clock = ::nowUs
             startEncoder(session)
@@ -393,6 +394,7 @@ class StreamService : Service(), StreamServer.Callbacks, ClientSession.Listener,
         ctrl.post {
             if (this.session === session) {
                 this.session = null
+                discovery?.announce = true
                 stopEncoder()
                 Hub.update { it.copy(pcName = null, stats = "") }
                 updateNotification()
