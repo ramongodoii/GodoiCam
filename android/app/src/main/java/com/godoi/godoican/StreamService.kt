@@ -49,7 +49,8 @@ import kotlin.math.min
  */
 class StreamService : Service(), StreamServer.Callbacks, ClientSession.Listener, CameraController.Listener {
 
-    class PreviewTarget(val surface: Surface, val width: Int, val height: Int)
+    /** [displayRotation]: rotação da tela em graus (0, 90, 180, 270), como em Display.getRotation. */
+    class PreviewTarget(val surface: Surface, val width: Int, val height: Int, val displayRotation: Int = 0)
 
     companion object {
         @Volatile var instance: StreamService? = null
@@ -70,7 +71,10 @@ class StreamService : Service(), StreamServer.Callbacks, ClientSession.Listener,
         /** Chamado pela tela. Síncrono: ao retornar, a GPU já soltou a Surface antiga. */
         fun setPreview(target: PreviewTarget?) {
             preview = target
-            instance?.renderer?.setPreviewSurface(target?.surface, target?.width ?: 0, target?.height ?: 0)
+            instance?.let { svc ->
+                svc.applyPreviewTransform()
+                svc.renderer?.setPreviewSurface(target?.surface, target?.width ?: 0, target?.height ?: 0)
+            }
         }
     }
 
@@ -106,17 +110,40 @@ class StreamService : Service(), StreamServer.Callbacks, ClientSession.Listener,
     private var statsTicks = 0
 
     @Volatile private var deviceOrientation = 0
+    private var pendingOrientation = -1
+
+    /**
+     * Gira a imagem enviada ao PC só quando o celular fica na nova posição por 500 ms e
+     * passou bem do meio-termo (60°), para não alternar perto da diagonal.
+     */
     private val orientationListener by lazy {
         object : OrientationEventListener(this) {
             override fun onOrientationChanged(orientation: Int) {
                 if (orientation == ORIENTATION_UNKNOWN || !settings.autoRotate) return
                 val d = abs(orientation - deviceOrientation) % 360
-                if (min(d, 360 - d) > 55) {
-                    deviceOrientation = ((orientation + 45) / 90 * 90) % 360
-                    ctrl.post { applyTransform() }
+                if (min(d, 360 - d) <= 60) {
+                    if (pendingOrientation != -1) {
+                        pendingOrientation = -1
+                        ctrl.removeCallbacks(commitOrientation)
+                    }
+                    return
+                }
+                val candidate = ((orientation + 45) / 90 * 90) % 360
+                if (candidate != pendingOrientation) {
+                    pendingOrientation = candidate
+                    ctrl.removeCallbacks(commitOrientation)
+                    ctrl.postDelayed(commitOrientation, 500)
                 }
             }
         }
+    }
+
+    private val commitOrientation = Runnable {
+        if (pendingOrientation == -1) return@Runnable
+        deviceOrientation = pendingOrientation
+        pendingOrientation = -1
+        applyTransform()
+        encoder?.requestKeyframe() // começa a imagem girada com um quadro limpo
     }
 
     // ---------------------------------------------------------------- ciclo de vida
@@ -281,6 +308,18 @@ class StreamService : Service(), StreamServer.Callbacks, ClientSession.Listener,
         r.rotation = (base + settings.rotationOffset) % 360
         r.mirror = settings.mirror
         r.fill = settings.fill
+        applyPreviewTransform()
+    }
+
+    /** A prévia segue a rotação da tela (como um app de câmera); a frontal aparece espelhada. */
+    fun applyPreviewTransform() {
+        val r = renderer ?: return
+        val info = camInfo ?: return
+        val display = preview?.displayRotation ?: 0
+        val front = info.facing == CameraCharacteristics.LENS_FACING_FRONT
+        r.previewRotation = if (front) (info.sensorOrientation + display) % 360
+        else (info.sensorOrientation - display + 360) % 360
+        r.previewMirror = front
     }
 
     override fun onCameraReady() {
@@ -318,6 +357,17 @@ class StreamService : Service(), StreamServer.Callbacks, ClientSession.Listener,
         settings.cameraId = cams[(i + 1) % cams.size].id
         settings.zoom = 1f
         restartPipeline()
+    }
+
+    /** Qualidade (bitrate) muda na hora, sem reiniciar câmera nem encoder. */
+    fun applyQuality() {
+        ctrl.post {
+            targetBitrate = settings.bitrate()
+            encoder?.setBitrate(targetBitrate)
+            Hub.update {
+                it.copy(video = it.video.substringBeforeLast(" • ") + " • ${AppSettings.QUALITY_NAMES[settings.quality]}")
+            }
+        }
     }
 
     fun updateTransform() {

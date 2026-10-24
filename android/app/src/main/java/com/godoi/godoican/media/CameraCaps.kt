@@ -81,8 +81,13 @@ object CameraCaps {
             ?: usable.maxBy { it.width * it.height }
     }
 
-    /** Encoder H.264 preferido: hardware primeiro, software só se não houver outro. */
-    fun encoderInfo(): MediaCodecInfo? {
+    /** Encoder H.264 preferido (consultado uma vez: montar a MediaCodecList é lento). */
+    fun encoderInfo(): MediaCodecInfo? = cachedEncoder
+
+    private val cachedEncoder: MediaCodecInfo? by lazy { findEncoder() }
+
+    /** Hardware primeiro, software só se não houver outro. */
+    private fun findEncoder(): MediaCodecInfo? {
         val encoders = MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.filter { info ->
             info.isEncoder && info.supportedTypes.any { it.equals(MediaFormat.MIMETYPE_VIDEO_AVC, true) }
         }
@@ -92,7 +97,18 @@ object CameraCaps {
         return encoders.firstOrNull(::isHardware) ?: encoders.firstOrNull()
     }
 
-    fun resolutions(c: CameraCharacteristics, fps: Int): List<Resolution> {
+    private val resolutionCache = HashMap<String, List<Resolution>>()
+
+    /** Resoluções que câmera e encoder aguentam no FPS pedido (guardado em cache por câmera). */
+    fun resolutions(c: CameraCharacteristics, fps: Int): List<Resolution> =
+        synchronized(resolutionCache) {
+            // O objeto CameraCharacteristics muda a cada consulta; a chave usa o conteúdo.
+            val key = "${c.get(CameraCharacteristics.LENS_FACING)}|" +
+                "${c.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)}|$fps"
+            resolutionCache.getOrPut(key) { computeResolutions(c, fps) }
+        }
+
+    private fun computeResolutions(c: CameraCharacteristics, fps: Int): List<Resolution> {
         val video = encoderInfo()?.getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC)?.videoCapabilities
         return CANDIDATES.filter { r ->
             val cam = cameraSize(c, r.width, r.height, fps)

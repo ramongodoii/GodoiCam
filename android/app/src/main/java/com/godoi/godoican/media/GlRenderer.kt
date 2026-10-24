@@ -14,13 +14,73 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.math.max
+import kotlin.math.min
 
 /**
- * Recebe os quadros da câmera numa textura externa e desenha, na GPU, a mesma imagem
- * (girada, espelhada e enquadrada) na Surface do encoder e na prévia da tela.
+ * Recebe os quadros da câmera numa textura externa e desenha, na GPU:
+ * - na Surface do encoder: a imagem enviada ao PC (16:9, girada conforme o celular);
+ * - na prévia: a câmera inteira, sempre em pé como num app de câmera, com a área que
+ *   NÃO vai para o PC escurecida.
  * Nenhum quadro passa pela CPU.
  */
 class GlRenderer {
+    /**
+     * Como a imagem da câmera ocupa uma área: rotação horária, espelho e preencher
+     * (corta) ou encaixar (faixas). Converte entre coordenadas da área (NDC, -1..1) e
+     * coordenadas da textura da câmera (uv, 0..1, antes da matriz da SurfaceTexture).
+     */
+    private class Placement(
+        val rotation: Int,
+        val mirror: Boolean,
+        fill: Boolean,
+        camW: Int,
+        camH: Int,
+        areaW: Int,
+        areaH: Int,
+    ) {
+        val sx: Float
+        val sy: Float
+
+        init {
+            val content = if (rotation % 180 == 0) camW.toFloat() / camH else camH.toFloat() / camW
+            val target = areaW.toFloat() / max(areaH, 1)
+            var x = 1f
+            var y = 1f
+            if (fill) {
+                if (content > target) x = content / target else y = target / content
+            } else {
+                if (content > target) y = target / content else x = content / target
+            }
+            sx = x
+            sy = y
+        }
+
+        /** Canto da área (0..1, y para cima) → uv. */
+        fun uv(cx: Float, cy: Float): FloatArray {
+            val mx = if (mirror) 1f - cx else cx
+            return when (rotation) {
+                90 -> floatArrayOf(1f - cy, mx)
+                180 -> floatArrayOf(1f - mx, 1f - cy)
+                270 -> floatArrayOf(cy, 1f - mx)
+                else -> floatArrayOf(mx, cy)
+            }
+        }
+
+        fun ndcToUv(px: Float, py: Float): FloatArray = uv((px / sx + 1) / 2, (py / sy + 1) / 2)
+
+        fun uvToNdc(u: Float, v: Float): FloatArray {
+            var (cx, cy) = when (rotation) {
+                90 -> v to 1f - u
+                180 -> 1f - u to 1f - v
+                270 -> 1f - v to u
+                else -> u to v
+            }
+            if (mirror) cx = 1f - cx
+            return floatArrayOf((cx * 2 - 1) * sx, (cy * 2 - 1) * sy)
+        }
+    }
+
     private val thread = HandlerThread("GodoiCan-gl").apply { start() }
     private val handler = Handler(thread.looper)
 
@@ -30,6 +90,9 @@ class GlRenderer {
     private var aPos = 0
     private var aUv = 0
     private var uTex = 0
+    private var solid = 0
+    private var sPos = 0
+    private var sColor = 0
     private var texId = 0
     private lateinit var surfaceTexture: SurfaceTexture
     private val texMatrix = FloatArray(16)
@@ -42,13 +105,17 @@ class GlRenderer {
     private var lastEncTs = 0L
 
     private var prevSurface: EGLSurface? = null
+    private var prevTarget: Surface? = null
     private var prevW = 0
     private var prevH = 0
 
-    // Ajustes lidos pela thread GL a cada quadro.
+    // Saída para o PC.
     @Volatile var rotation = 0
     @Volatile var mirror = false
-    @Volatile var fill = false
+    @Volatile var fill = true
+    // Prévia na tela (rotação do display, espelho na frontal).
+    @Volatile var previewRotation = 90
+    @Volatile var previewMirror = false
     @Volatile var camW = 1920
     @Volatile var camH = 1080
     @Volatile var outW = 1920
@@ -73,10 +140,13 @@ class GlRenderer {
         egl = EglCore()
         idle = egl.createPbuffer(1, 1)
         egl.makeCurrent(idle)
-        program = buildProgram()
+        program = buildProgram(VERTEX, FRAGMENT)
         aPos = GLES20.glGetAttribLocation(program, "aPos")
         aUv = GLES20.glGetAttribLocation(program, "aUv")
         uTex = GLES20.glGetUniformLocation(program, "uTex")
+        solid = buildProgram(SOLID_VERTEX, SOLID_FRAGMENT)
+        sPos = GLES20.glGetAttribLocation(solid, "aPos")
+        sColor = GLES20.glGetUniformLocation(solid, "uColor")
         val ids = IntArray(1)
         GLES20.glGenTextures(1, ids, 0)
         texId = ids[0]
@@ -102,24 +172,36 @@ class GlRenderer {
         lastEncTs = 0
     }
 
+    /** Mesma Surface com outro tamanho (giro da tela): só atualiza o tamanho, sem recriar nada. */
     fun setPreviewSurface(surface: Surface?, width: Int, height: Int) = sync {
+        if (surface != null && surface === prevTarget && prevSurface != null) {
+            prevW = width
+            prevH = height
+            return@sync
+        }
         prevSurface?.let {
             egl.makeCurrent(idle)
             egl.destroySurface(it)
         }
         prevSurface = null
+        prevTarget = null
         if (surface != null && surface.isValid) {
             try {
                 val s = egl.createWindowSurface(surface)
                 egl.makeCurrent(s)
                 EGL14.eglSwapInterval(egl.display, 0) // a prévia nunca pode segurar o encoder
                 prevSurface = s
+                prevTarget = surface
             } catch (_: Exception) {
             }
         }
         prevW = width
         prevH = height
     }
+
+    private fun outputPlacement() = Placement(rotation, mirror, fill, camW, camH, outW, outH)
+
+    private fun previewPlacement() = Placement(previewRotation, previewMirror, false, camW, camH, prevW, prevH)
 
     private fun onFrame() {
         try {
@@ -140,7 +222,7 @@ class GlRenderer {
                 GLES20.glViewport(0, 0, encW, encH)
                 GLES20.glClearColor(0f, 0f, 0f, 1f)
                 GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
-                draw(0, 0, encW, encH)
+                drawCamera(Placement(rotation, mirror, fill, camW, camH, encW, encH))
                 egl.setPresentationTime(s, ts)
                 egl.swap(s)
                 encodedFrames.incrementAndGet()
@@ -152,61 +234,23 @@ class GlRenderer {
             GLES20.glViewport(0, 0, prevW, prevH)
             GLES20.glClearColor(0f, 0f, 0f, 1f)
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
-            val box = letterbox(prevW, prevH)
-            draw(box[0], box[1], box[2], box[3])
+            val p = previewPlacement()
+            drawCamera(p)
+            drawSentArea(p)
             if (!egl.swap(s)) {
                 egl.makeCurrent(idle)
                 egl.destroySurface(s)
                 prevSurface = null
+                prevTarget = null
             }
         }
     }
 
-    /** Área (x, y, w, h) da imagem de saída dentro da prévia, mantendo a proporção. */
-    private fun letterbox(viewW: Int, viewH: Int): IntArray {
-        val outAspect = outW.toFloat() / outH
-        val viewAspect = viewW.toFloat() / viewH
-        return if (viewAspect > outAspect) {
-            val w = (viewH * outAspect).toInt()
-            intArrayOf((viewW - w) / 2, 0, w, viewH)
-        } else {
-            val h = (viewW / outAspect).toInt()
-            intArrayOf(0, (viewH - h) / 2, viewW, h)
-        }
-    }
-
-    /** Escala do quadrilátero da câmera dentro de uma área com proporção [targetAspect]. */
-    private fun contentScale(targetAspect: Float): FloatArray {
-        val rot = rotation
-        val content = if (rot % 180 == 0) camW.toFloat() / camH else camH.toFloat() / camW
-        var sx = 1f
-        var sy = 1f
-        if (fill) {
-            if (content > targetAspect) sx = content / targetAspect else sy = targetAspect / content
-        } else {
-            if (content > targetAspect) sy = targetAspect / content else sx = content / targetAspect
-        }
-        return floatArrayOf(sx, sy)
-    }
-
-    /** Ponto da tela de saída (0..1, y para cima) → coordenada de textura antes da matriz da SurfaceTexture. */
-    private fun mapUv(x: Float, y: Float): FloatArray {
-        val mx = if (mirror) 1f - x else x
-        return when (rotation) {
-            90 -> floatArrayOf(1f - y, mx)
-            180 -> floatArrayOf(1f - mx, 1f - y)
-            270 -> floatArrayOf(y, 1f - mx)
-            else -> floatArrayOf(mx, y)
-        }
-    }
-
-    private fun draw(x: Int, y: Int, w: Int, h: Int) {
-        GLES20.glViewport(x, y, w, h)
-        val (sx, sy) = contentScale(w.toFloat() / h).let { it[0] to it[1] }
+    private fun drawCamera(p: Placement) {
         vertices.clear()
         for ((cx, cy) in CORNERS) {
-            val uv = mapUv(cx, cy)
-            vertices.put((cx * 2 - 1) * sx).put((cy * 2 - 1) * sy).put(uv[0]).put(uv[1])
+            val uv = p.uv(cx, cy)
+            vertices.put((cx * 2 - 1) * p.sx).put((cy * 2 - 1) * p.sy).put(uv[0]).put(uv[1])
         }
         vertices.position(0)
         GLES20.glUseProgram(program)
@@ -221,20 +265,77 @@ class GlRenderer {
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
     }
 
+    /** Retângulo da prévia (NDC) que corresponde ao que o PC recebe. */
+    private fun sentRect(p: Placement): FloatArray {
+        val out = outputPlacement()
+        var x0 = Float.MAX_VALUE
+        var y0 = Float.MAX_VALUE
+        var x1 = -Float.MAX_VALUE
+        var y1 = -Float.MAX_VALUE
+        for ((nx, ny) in listOf(-1f to -1f, 1f to -1f, -1f to 1f, 1f to 1f)) {
+            val uv = out.ndcToUv(nx, ny)
+            val q = p.uvToNdc(uv[0].coerceIn(0f, 1f), uv[1].coerceIn(0f, 1f))
+            x0 = min(x0, q[0])
+            y0 = min(y0, q[1])
+            x1 = max(x1, q[0])
+            y1 = max(y1, q[1])
+        }
+        return floatArrayOf(x0, y0, x1, y1)
+    }
+
+    /** Escurece, na prévia, tudo o que fica fora da imagem enviada ao PC. */
+    private fun drawSentArea(p: Placement) {
+        val r = sentRect(p)
+        // Limites da imagem da câmera na prévia.
+        val cx0 = -p.sx
+        val cy0 = -p.sy
+        val cx1 = p.sx
+        val cy1 = p.sy
+        val x0 = max(r[0], cx0)
+        val y0 = max(r[1], cy0)
+        val x1 = min(r[2], cx1)
+        val y1 = min(r[3], cy1)
+        if (x0 <= cx0 + 0.01f && y0 <= cy0 + 0.01f && x1 >= cx1 - 0.01f && y1 >= cy1 - 0.01f) return
+        GLES20.glEnable(GLES20.GL_BLEND)
+        GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
+        GLES20.glUseProgram(solid)
+        GLES20.glUniform4f(sColor, 0f, 0f, 0f, 0.6f)
+        rect(cx0, y1, cx1, cy1) // acima
+        rect(cx0, cy0, cx1, y0) // abaixo
+        rect(cx0, y0, x0, y1) // esquerda
+        rect(x1, y0, cx1, y1) // direita
+        // Contorno fino da área enviada.
+        GLES20.glUniform4f(sColor, 1f, 1f, 1f, 0.55f)
+        val tx = 2f / max(prevW, 1) * 2
+        val ty = 2f / max(prevH, 1) * 2
+        rect(x0, y1 - ty, x1, y1)
+        rect(x0, y0, x1, y0 + ty)
+        rect(x0, y0, x0 + tx, y1)
+        rect(x1 - tx, y0, x1, y1)
+        GLES20.glDisable(GLES20.GL_BLEND)
+    }
+
+    private fun rect(x0: Float, y0: Float, x1: Float, y1: Float) {
+        if (x1 <= x0 || y1 <= y0) return
+        vertices.clear()
+        vertices.put(x0).put(y0).put(x1).put(y0).put(x0).put(y1).put(x1).put(y1)
+        vertices.position(0)
+        GLES20.glVertexAttribPointer(sPos, 2, GLES20.GL_FLOAT, false, 8, vertices)
+        GLES20.glEnableVertexAttribArray(sPos)
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+    }
+
     /**
      * Converte um toque na prévia em coordenadas normalizadas do sensor (x para a direita,
-     * y para baixo), desfazendo enquadramento, espelho e rotação. Null se o toque caiu na borda.
+     * y para baixo). Null se o toque caiu fora da imagem.
      */
     fun previewToSensor(px: Float, py: Float): PointF? {
         if (prevW == 0 || prevH == 0) return null
-        val box = letterbox(prevW, prevH)
-        val ox = (px - box[0]) / box[2]
-        val oy = 1f - (py - (prevH - box[1] - box[3])) / box[3]
-        val s = contentScale(outW.toFloat() / outH)
-        val cx = ((ox * 2 - 1) / s[0] + 1) / 2
-        val cy = ((oy * 2 - 1) / s[1] + 1) / 2
-        if (cx !in 0f..1f || cy !in 0f..1f) return null
-        val uv = mapUv(cx, cy)
+        val p = previewPlacement()
+        val nx = px / prevW * 2 - 1
+        val ny = 1 - py / prevH * 2
+        if (nx < -p.sx || nx > p.sx || ny < -p.sy || ny > p.sy) return null
+        val uv = p.ndcToUv(nx, ny)
         return PointF(uv[0], 1f - uv[1])
     }
 
@@ -244,17 +345,19 @@ class GlRenderer {
             prevSurface?.let { egl.destroySurface(it) }
             encSurface = null
             prevSurface = null
+            prevTarget = null
             surfaceTexture.release()
             egl.makeCurrent(idle)
             GLES20.glDeleteTextures(1, intArrayOf(texId), 0)
             GLES20.glDeleteProgram(program)
+            GLES20.glDeleteProgram(solid)
             egl.destroySurface(idle)
             egl.release()
         }
         thread.quitSafely()
     }
 
-    private fun buildProgram(): Int {
+    private fun buildProgram(vertex: String, fragment: String): Int {
         fun compile(type: Int, src: String): Int {
             val shader = GLES20.glCreateShader(type)
             GLES20.glShaderSource(shader, src)
@@ -265,8 +368,8 @@ class GlRenderer {
             return shader
         }
         val p = GLES20.glCreateProgram()
-        GLES20.glAttachShader(p, compile(GLES20.GL_VERTEX_SHADER, VERTEX))
-        GLES20.glAttachShader(p, compile(GLES20.GL_FRAGMENT_SHADER, FRAGMENT))
+        GLES20.glAttachShader(p, compile(GLES20.GL_VERTEX_SHADER, vertex))
+        GLES20.glAttachShader(p, compile(GLES20.GL_FRAGMENT_SHADER, fragment))
         GLES20.glLinkProgram(p)
         val ok = IntArray(1)
         GLES20.glGetProgramiv(p, GLES20.GL_LINK_STATUS, ok, 0)
@@ -282,20 +385,36 @@ class GlRenderer {
             attribute vec2 aPos;
             attribute vec2 aUv;
             uniform mat4 uTex;
-            varying vec2 vUv;
+            varying highp vec2 vUv;
             void main() {
                 gl_Position = vec4(aPos, 0.0, 1.0);
                 vUv = (uTex * vec4(aUv, 0.0, 1.0)).xy;
             }
         """
 
+        // highp nas coordenadas: com mediump a amostragem perde precisão em 1080p/4K.
         const val FRAGMENT = """
             #extension GL_OES_EGL_image_external : require
             precision mediump float;
             uniform samplerExternalOES sTex;
-            varying vec2 vUv;
+            varying highp vec2 vUv;
             void main() {
                 gl_FragColor = texture2D(sTex, vUv);
+            }
+        """
+
+        const val SOLID_VERTEX = """
+            attribute vec2 aPos;
+            void main() {
+                gl_Position = vec4(aPos, 0.0, 1.0);
+            }
+        """
+
+        const val SOLID_FRAGMENT = """
+            precision mediump float;
+            uniform vec4 uColor;
+            void main() {
+                gl_FragColor = uColor;
             }
         """
     }

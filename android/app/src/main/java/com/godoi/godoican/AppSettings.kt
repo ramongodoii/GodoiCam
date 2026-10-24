@@ -27,8 +27,8 @@ class AppSettings(context: Context) {
         get() = p.getBoolean("mirror", false)
         set(v) = p.edit().putBoolean("mirror", v).apply()
     var fill: Boolean
-        get() = p.getBoolean("fill", false)
-        set(v) = p.edit().putBoolean("fill", v).apply()
+        get() = p.getBoolean("fill2", true)
+        set(v) = p.edit().putBoolean("fill2", v).apply()
     var autoRotate: Boolean
         get() = p.getBoolean("autoRotate", true)
         set(v) = p.edit().putBoolean("autoRotate", v).apply()

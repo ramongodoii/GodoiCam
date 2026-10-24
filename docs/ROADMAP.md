@@ -89,6 +89,12 @@ Sem números não dá para saber se uma mudança melhorou o atraso ou a qualidad
 
 ## Fase 3 — Interface do celular
 
+> **Status (23/10/2026): feita, testada no emulador em retrato e paisagem.**
+> - Prévia na tela inteira, sempre em pé; a área que vai para o PC fica clara e o resto escurecido.
+> - Selo de estado no topo (toque mostra IP e estatísticas); 4 botões redondos com ícones; atalhos de zoom (0,6× / 1× / 2× / 3×…).
+> - Ajustes numa folha inferior; "Desligar" foi para dentro dela; respeita barras e recorte da câmera.
+> - **Pendente:** conferir no S24 com fonte grande e modo escuro.
+
 - **[Melhorar]** Prévia em tela cheia, preenchendo a tela do celular (cortando bordas), em retrato e paisagem. A prévia mostra a câmera; o que vai para o PC aparece como uma moldura indicando a área enviada.
 - **[Melhorar]** Barra de controles com ícones (não texto), que caiba em retrato e paisagem sem rolar: trocar câmera, lanterna, ajustes, tela preta. "Desligar" vira ícone ou fica na notificação.
 - **[Melhorar]** Ajustes em uma folha inferior (bottom sheet) que se adapta à orientação, em vez do painel fixo de 340dp.
@@ -99,6 +105,12 @@ Sem números não dá para saber se uma mudança melhorou o atraso ou a qualidad
 ---
 
 ## Fase 4 — Rotação e sincronia
+
+> **Status (23/10/2026): feita (rotação); sincronia de áudio fica para a Fase 8.**
+> - Celular em pé: o PC recebe o 16:9 preenchido (sem faixas). Opção em Ajustes para voltar às faixas.
+> - Ao girar, a prévia só muda de tamanho (a Surface não é recriada) e a imagem do PC só gira depois de 500 ms parado, com um quadro‑chave novo.
+> - O PC não apaga mais a imagem em quedas curtas.
+> - **Pendente:** girar 20 vezes numa chamada real no Teams com o S24.
 
 Aqui "sincronia" = a imagem do PC acompanhar o celular sem tremer, travar ou atrasar, e (mais tarde) o áudio alinhado com o vídeo.
 
@@ -138,6 +150,8 @@ Cada item deve ser medido com a tabela da Fase 0 antes e depois.
 ---
 
 ## Fase 7 — Ajustes rápidos e completos
+
+> **Adiantado na Fase 3:** capacidades da câmera/encoder em cache e qualidade muda o bitrate na hora (sem reiniciar). O resto continua pendente.
 
 - **[Melhorar]** Calcular as capacidades da câmera e do encoder **uma vez** (em segundo plano, com cache) e nunca na thread principal.
 - **[Melhorar]** Separar o que reinicia a câmera (câmera, resolução, FPS) do que é instantâneo (exposição, balanço de branco, espelho, zoom, qualidade via `setBitrate`). Qualidade não deve reiniciar nada.

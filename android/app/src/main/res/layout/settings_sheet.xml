@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@color/panel">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingStart="24dp"
+        android:paddingTop="8dp"
+        android:paddingEnd="24dp"
+        android:paddingBottom="32dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/settings"
+            android:textColor="@color/text_primary"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <TextView style="@style/Section" android:text="@string/section_video" />
+
+        <TextView style="@style/Label" android:text="@string/camera" />
+        <Spinner android:id="@+id/spCamera" style="@style/Picker" />
+
+        <TextView style="@style/Label" android:text="@string/resolution" />
+        <Spinner android:id="@+id/spResolution" style="@style/Picker" />
+
+        <TextView style="@style/Label" android:text="@string/fps" />
+        <Spinner android:id="@+id/spFps" style="@style/Picker" />
+
+        <TextView style="@style/Label" android:text="@string/quality" />
+        <Spinner android:id="@+id/spQuality" style="@style/Picker" />
+
+        <TextView style="@style/Section" android:text="@string/section_image" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/swFill"
+            style="@style/Toggle"
+            android:text="@string/fill" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/swMirror"
+            style="@style/Toggle"
+            android:text="@string/mirror" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/swAutoRotate"
+            style="@style/Toggle"
+            android:text="@string/auto_rotate" />
+
+        <TextView style="@style/Label" android:text="@string/rotation_offset" />
+        <Spinner android:id="@+id/spRotation" style="@style/Picker" />
+
+        <TextView
+            android:id="@+id/lblExposure"
+            style="@style/Label"
+            android:text="@string/exposure" />
+        <SeekBar
+            android:id="@+id/sbExposure"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp" />
+
+        <TextView style="@style/Label" android:text="@string/white_balance" />
+        <Spinner android:id="@+id/spAwb" style="@style/Picker" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/swAeLock"
+            style="@style/Toggle"
+            android:text="@string/ae_lock" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/swStabilization"
+            style="@style/Toggle"
+            android:text="@string/stabilization" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/swLowLight"
+            style="@style/Toggle"
+            android:text="@string/low_light" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnAutoFocus"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/auto_focus" />
+
+        <TextView style="@style/Section" android:text="@string/section_pcs" />
+
+        <TextView
+            android:id="@+id/pairedList"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:textColor="@color/text_secondary"
+            android:textSize="14sp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnForget"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/forget_pcs" />
+
+        <TextView style="@style/Section" android:text="@string/section_diagnostics" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnReport"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/share_report" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnPower"
+            style="@style/Widget.Material3.Button"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="@string/power_off"
+            app:icon="@drawable/ic_power"
+            xmlns:app="http://schemas.android.com/apk/res-auto" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/tips"
+            android:textColor="@color/text_secondary"
+            android:textSize="13sp" />
+    </LinearLayout>
+</androidx.core.widget.NestedScrollView>

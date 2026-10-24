@@ -5,8 +5,8 @@
     <string name="torch">Lanterna</string>
     <string name="settings">Ajustes</string>
     <string name="curtain">Tela preta</string>
-    <string name="power_off">Desligar</string>
-    <string name="power_on">Ligar</string>
+    <string name="power_off">Desligar o GodoiCan</string>
+    <string name="power_on">Ligar o GodoiCan</string>
     <string name="close">Fechar</string>
     <string name="pair_title">Código de pareamento</string>
     <string name="section_video">Vídeo</string>
@@ -17,7 +17,7 @@
     <string name="fps">Quadros por segundo</string>
     <string name="quality">Qualidade (taxa de bits)</string>
     <string name="mirror">Espelhar imagem</string>
-    <string name="fill">Preencher o quadro (corta as bordas)</string>
+    <string name="fill">Preencher o quadro 16:9 (sem faixas pretas)</string>
     <string name="auto_rotate">Girar com o celular</string>
     <string name="rotation_offset">Correção de rotação</string>
     <string name="exposure">Exposição</string>
@@ -29,6 +29,6 @@
     <string name="section_diagnostics">Diagnóstico</string>
     <string name="share_report">Compartilhar relatório do aparelho</string>
     <string name="forget_pcs">Esquecer todos os PCs</string>
-    <string name="tips">Toque na imagem para focar. Toque duas vezes para voltar ao foco automático. Use dois dedos para zoom.</string>
+    <string name="tips">Toque na imagem para focar e duas vezes para voltar ao automático. Dois dedos para zoom. A área clara da prévia é o que vai para o PC; toque no selo do topo para ver detalhes.</string>
     <string name="curtain_hint">Toque duas vezes para voltar</string>
 </resources>
