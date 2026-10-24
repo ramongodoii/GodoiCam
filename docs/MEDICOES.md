@@ -52,6 +52,14 @@ Base para comparar cada melhoria das próximas fases. Tudo medido no **Samsung S
 - 1080p e 720p até 60 fps; 1440p e 4K até 30 fps; relógio REALTIME (o atraso medido é confiável).
 - Encoders de hardware: `c2.exynos.h264.encoder`, `c2.exynos.hevc.encoder` e as variantes **`.wfd`** (feitas para espelhamento de tela, normalmente de baixa latência). Nenhum anuncia `FEATURE_LowLatency` nem intra‑refresh. Suportam VBR e CBR até 240 Mbps.
 
+### Incidente 23/10/2026 21:43 — atraso de segundos depois das Fases 3/4
+
+- Celular normal: 30 fps capturados e codificados, codificação ~90 ms (igual à base).
+- Rede: RTT de **3 a 13 s** (base: 7 ms); PC recebendo em rajadas (1–111 fps).
+- Celular a **43 °C, estado térmico 3 (severo)**; base era 37 °C.
+- Fila do app sempre 0: o atraso estava escondido no buffer de envio do sistema (vários MB), então o app nunca descartava quadros nem baixava o bitrate a tempo.
+- **Correção:** buffer de envio do socket em 64 KB (~50 ms a 10 Mbps), descarte de quadros com mais de 200 ms na fila e aviso de congestionamento quando um envio leva mais de 150 ms (baixa bitrate + quadro‑chave).
+
 ### Vidro a vidro (preencher)
 
 | Cenário | GodoiCan p50 | GodoiCan p95 | Iriun p50 | Iriun p95 |

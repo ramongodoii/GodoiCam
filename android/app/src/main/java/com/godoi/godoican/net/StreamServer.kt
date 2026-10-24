@@ -55,6 +55,7 @@ class StreamServer(
         var session: ClientSession? = null
         try {
             sock.tcpNoDelay = true
+            sock.sendBufferSize = ClientSession.SOCKET_SEND_BUFFER
             sock.soTimeout = 15_000
             val io = FrameIO(sock)
 
