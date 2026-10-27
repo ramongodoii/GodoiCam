@@ -9,7 +9,7 @@ celular  →  H.264  →  Wi‑Fi ou USB (AES‑256‑GCM)  →  PC  →  câmer
                                                               Zoom, Teams, Meet, OBS, Discord…
 ```
 
-**Versão atual: 0.1.0** (ainda não há Release pública com instaladores; veja [Instalar](#instalar) para compilação). O que falta para postar no GitHub está em [`docs/LANCAMENTO.md`](docs/LANCAMENTO.md).
+**Versão atual: 0.1.0.** Código: [github.com/ramongodoii/GodoiCam](https://github.com/ramongodoii/GodoiCam). Ainda não há Release com APK/ZIP prontos; veja [Instalar](#instalar) para compilação. O que falta para a primeira Release está em [`docs/LANCAMENTO.md`](docs/LANCAMENTO.md).
 
 ## O que precisa
 

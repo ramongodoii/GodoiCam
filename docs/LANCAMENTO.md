@@ -40,8 +40,8 @@ Pode abrir o repositório e publicar a **Release v0.1.0** quando **todos** os bl
 
 ### A2. Repositório público
 
-- [ ] Git remoto (GitHub é o caminho mais simples). Hoje **não há `git remote`**.
-- [ ] Commit de tudo o que está só na máquina (renomeação GodoiCan→GodoiCam, Modo Pro, USB, qualidade, etc.). **Ainda não está commitado.**
+- [x] Git remoto: https://github.com/ramongodoii/GodoiCam
+- [x] Commit da linha GodoiCam 0.1.0 na `master`.
 - [x] `.gitignore` cobrindo build, `.idea`, `local.properties`, `*.jks`, `*.keystore` (não vazar chave de assinatura).
 - [ ] Nada de `%APPDATA%\GodoiCam\` (log, `stats.csv`, `pairs.dat`, relatório do S24) no git.
 
@@ -113,8 +113,8 @@ Faça **nesta ordem**. Uma caixa por vez; não misturar com áudio nem Play Stor
 2. ~~LICENSE, README, TUTORIAL, bitrate, limites, privacidade.~~
 3. ~~`.gitignore` (jks/keystore fora do git).~~
 4. ~~Keystore de release local.~~
-5. Commit único (ou poucos) da linha atual GodoiCam.
-6. Criar o repositório no GitHub e dar `git push`.
+5. ~~Commit da linha GodoiCam 0.1.0.~~
+6. ~~Repositório https://github.com/ramongodoii/GodoiCam (público).~~
 7. Gerar APK + `windows\build.cmd` + ZIP, tag `v0.1.0`, GitHub Release.
 8. Teste “estranho na primeira vez” (seção B).
 9. Anúncio: README é a loja. Sem Play Store neste passo.
@@ -128,8 +128,8 @@ Quando o item 7 estiver feito, **pode postar**.
 | Área | Situação |
 |---|---|
 | Licença | MIT (`LICENSE`) |
-| Git remote | **Nenhum** |
-| Trabalho local não commitado | Muito (rename, Pro, USB, qualidade, docs de lançamento…) |
+| Git remote | https://github.com/ramongodoii/GodoiCam |
+| Trabalho local | Commitado na `master` (27/10/2026) |
 | APK release | Keystore local (fora do git); falta a Release pública |
 | Instalador Windows | `instalar.cmd` (pede admin); não é MSI |
 | `adb` | Não vem no ZIP; procura SDK ou pasta `adb\` |
