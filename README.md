@@ -9,7 +9,7 @@ celular  →  H.264  →  Wi‑Fi ou USB (AES‑256‑GCM)  →  PC  →  câmer
                                                               Zoom, Teams, Meet, OBS, Discord…
 ```
 
-**Versão atual: 0.1.0.** Código: [github.com/ramongodoii/GodoiCam](https://github.com/ramongodoii/GodoiCam). Ainda não há Release com APK/ZIP prontos; veja [Instalar](#instalar) para compilação. O que falta para a primeira Release está em [`docs/LANCAMENTO.md`](docs/LANCAMENTO.md).
+**Versão atual: 0.1.0.** Código e instaladores: [github.com/ramongodoii/GodoiCam](https://github.com/ramongodoii/GodoiCam). O mapa do que ainda falta (áudio, Play Store…) está em [`docs/LANCAMENTO.md`](docs/LANCAMENTO.md).
 
 ## O que precisa
 
@@ -23,17 +23,21 @@ celular  →  H.264  →  Wi‑Fi ou USB (AES‑256‑GCM)  →  PC  →  câmer
 
 ## Instalar
 
+Baixe a [Release mais recente](https://github.com/ramongodoii/GodoiCam/releases): o APK do celular e o ZIP do Windows.
+
 ### Celular
 
-1. Instale o `GodoiCam.apk` (quem compilou: `android/app/build/outputs/apk/release/app-release.apk`).
+1. Instale `GodoiCam-0.1.0.apk`.
 2. Abra o GodoiCam e aceite a permissão de **câmera**.
 
-O Android pode avisar que o app não veio da Play Store. Isso é esperado enquanto a distribuição for por APK.
+O Android avisa que o app não veio da Play Store. Isso é esperado.
+
+Quem for compilar: o APK sai em `android/app/build/outputs/apk/release/app-release.apk`.
 
 ### PC
 
-1. Compile o Windows (`windows\build.cmd`) **ou** use os arquivos de uma Release, quando existir.
-2. Dê dois cliques em `windows\instalar.cmd` e aceite o pedido de administrador (só nesta vez).
+1. Extraia `GodoiCam-0.1.0-windows.zip`.
+2. Dê dois cliques em `instalar.cmd` e aceite o pedido de administrador (só nesta vez).
 3. Se o SmartScreen bloquear, use **Mais informações → Executar assim mesmo**.
 
 O instalador copia o app para `C:\Program Files\GodoiCam`, registra a câmera virtual, libera o firewall e cria o atalho no menu Iniciar. Nas próximas vezes, abra **GodoiCam** pelo menu Iniciar.

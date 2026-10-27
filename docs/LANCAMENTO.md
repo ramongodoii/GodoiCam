@@ -49,7 +49,7 @@ Pode abrir o repositório e publicar a **Release v0.1.0** quando **todos** os bl
 
 Hoje só quem **compila** usa. Um desconhecido precisa de arquivos prontos:
 
-- [ ] **Release no GitHub** com APK + ZIP do Windows (`GodoiCam.exe`, DLL, `instalar.cmd`, `desinstalar.cmd`).
+- [x] **Release no GitHub** `v0.1.0` com APK + ZIP do Windows.
 - [x] Keystore de release local (`android/godoicam-release.jks` + `keystore.properties`, fora do git). O Gradle usa isso se o arquivo existir; senão cai na chave debug.
 - [x] README de instalação **sem** caminho `D:\GodoiCam`. Tutorial alinhado à UI atual.
 - [x] Aviso no README: o Windows SmartScreen pode recusar o `.exe` não assinado.
@@ -115,11 +115,11 @@ Faça **nesta ordem**. Uma caixa por vez; não misturar com áudio nem Play Stor
 4. ~~Keystore de release local.~~
 5. ~~Commit da linha GodoiCam 0.1.0.~~
 6. ~~Repositório https://github.com/ramongodoii/GodoiCam (público).~~
-7. Gerar APK + `windows\build.cmd` + ZIP, tag `v0.1.0`, GitHub Release.
+7. ~~Release `v0.1.0` (APK + ZIP).~~
 8. Teste “estranho na primeira vez” (seção B).
 9. Anúncio: README é a loja. Sem Play Store neste passo.
 
-Quando o item 7 estiver feito, **pode postar**.
+A Release `v0.1.0` já está no GitHub. Falta o teste “estranho na primeira vez” e, se quiser, um anúncio. Play Store continua depois.
 
 ---
 
@@ -130,7 +130,7 @@ Quando o item 7 estiver feito, **pode postar**.
 | Licença | MIT (`LICENSE`) |
 | Git remote | https://github.com/ramongodoii/GodoiCam |
 | Trabalho local | Commitado na `master` (27/10/2026) |
-| APK release | Keystore local (fora do git); falta a Release pública |
+| APK release | Keystore local (fora do git); Release `v0.1.0` no GitHub |
 | Instalador Windows | `instalar.cmd` (pede admin); não é MSI |
 | `adb` | Não vem no ZIP; procura SDK ou pasta `adb\` |
 | Windows 10 / macOS / iOS | Fora de escopo |

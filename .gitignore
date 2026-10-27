@@ -1,5 +1,6 @@
 windows/bin/
 windows/obj/
+dist/
 GodoiCam.apk
 *.apk
 *.jks

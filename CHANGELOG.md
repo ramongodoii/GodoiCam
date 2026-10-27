@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 (ainda não publicado)
+## 0.1.0 — 2026-10-27
 
 Primeira versão com nome **GodoiCam**, pensada para uso grátis e código aberto.
 
