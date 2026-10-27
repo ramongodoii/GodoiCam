@@ -1,4 +1,4 @@
-package com.godoi.godoican.net
+package com.godoi.godoicam.net
 
 import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
@@ -43,4 +43,5 @@ class Reader(data: ByteArray) {
     fun i64(): Long { need(8); return buf.long }
     fun bytes(n: Int): ByteArray { need(n); return ByteArray(n).also { buf.get(it) } }
     fun str(): String = String(bytes(u16()), Charsets.UTF_8)
+    fun remaining(): Int = buf.remaining()
 }

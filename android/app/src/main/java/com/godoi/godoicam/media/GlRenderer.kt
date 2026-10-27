@@ -1,4 +1,4 @@
-package com.godoi.godoican.media
+package com.godoi.godoicam.media
 
 import android.graphics.PointF
 import android.graphics.SurfaceTexture
@@ -81,7 +81,7 @@ class GlRenderer {
         }
     }
 
-    private val thread = HandlerThread("GodoiCan-gl").apply { start() }
+    private val thread = HandlerThread("GodoiCam-gl").apply { start() }
     private val handler = Handler(thread.looper)
 
     private lateinit var egl: EglCore
@@ -106,8 +106,8 @@ class GlRenderer {
     private var encSurface: EGLSurface? = null
     private var encW = 0
     private var encH = 0
-    @Volatile private var minEncIntervalNs = 0L
-    private var lastEncTs = 0L
+    @Volatile private var encIntervalNs = 0L
+    private var nextEncTs = 0L
 
     private var prevSurface: EGLSurface? = null
     private var prevTarget: Surface? = null
@@ -173,13 +173,25 @@ class GlRenderer {
         encSurface = surface?.let { egl.createWindowSurface(it) }
         encW = width
         encH = height
-        minEncIntervalNs = if (fps > 0) 1_000_000_000L / fps * 8 / 10 else 0
-        lastEncTs = 0
+        encIntervalNs = if (fps > 0) 1_000_000_000L / fps else 0
+        nextEncTs = 0
     }
 
     /** Codifica no máximo [fps] quadros por segundo (o resto da câmera vai só para a prévia). */
     fun setEncodeFps(fps: Int) {
-        minEncIntervalNs = if (fps > 0) 1_000_000_000L / fps * 8 / 10 else 0
+        encIntervalNs = if (fps > 0) 1_000_000_000L / fps else 0
+    }
+
+    /**
+     * Decide se o quadro [ts] vai para o encoder. Agenda pelo relógio ideal (e não pelo último
+     * quadro aceito), para 20 fps de uma câmera a 30 sair como 2 de cada 3, e não 1 de cada 2.
+     */
+    private fun takeForEncoder(ts: Long): Boolean {
+        val interval = encIntervalNs
+        if (interval <= 0) return true
+        if (ts + interval / 4 < nextEncTs) return false
+        nextEncTs = if (ts - nextEncTs > interval) ts + interval else nextEncTs + interval
+        return true
     }
 
     /** Mesma Surface com outro tamanho (giro da tela): só atualiza o tamanho, sem recriar nada. */
@@ -227,8 +239,7 @@ class GlRenderer {
 
         // Encoder primeiro: a prévia é secundária.
         encSurface?.let { s ->
-            if (ts - lastEncTs >= minEncIntervalNs) {
-                lastEncTs = ts
+            if (takeForEncoder(ts)) {
                 egl.makeCurrent(s)
                 GLES20.glViewport(0, 0, encW, encH)
                 GLES20.glClearColor(0f, 0f, 0f, 1f)
@@ -430,6 +441,8 @@ class GlRenderer {
         """
 
         // highp nas coordenadas: com mediump a amostragem perde precisão em 1080p/4K.
+        // Sem filtro extra aqui: um bilateral 5×5 na textura da câmera (4K) derrubou o
+        // envio para 6–10 fps no S24 (stats 25/10 22:01).
         const val FRAGMENT = """
             #extension GL_OES_EGL_image_external : require
             precision mediump float;

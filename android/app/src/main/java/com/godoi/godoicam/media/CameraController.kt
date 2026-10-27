@@ -1,4 +1,4 @@
-package com.godoi.godoican.media
+package com.godoi.godoicam.media
 
 import android.annotation.SuppressLint
 import android.content.Context
@@ -9,7 +9,11 @@ import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraDevice
 import android.hardware.camera2.CameraManager
 import android.hardware.camera2.CaptureRequest
+import android.hardware.camera2.CaptureResult
+import android.hardware.camera2.TotalCaptureResult
+import android.hardware.camera2.params.ColorSpaceTransform
 import android.hardware.camera2.params.MeteringRectangle
+import android.hardware.camera2.params.RggbChannelVector
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
@@ -23,6 +27,10 @@ class CameraController(context: Context, private val listener: Listener) {
     interface Listener {
         fun onCameraReady()
         fun onCameraError(message: String)
+        /** Os ajustes mudaram (pela tela ou pelo PC). Chamado na thread da câmera. */
+        fun onControlsChanged() {}
+        /** Primeiro quadro depois de abrir a câmera. Chamado na thread da câmera. */
+        fun onFirstFrame() {}
     }
 
     /** Ajustes que o usuário pode mudar com a câmera ligada. */
@@ -35,10 +43,28 @@ class CameraController(context: Context, private val listener: Listener) {
         val aeLock: Boolean = false,
         /** Ponto de foco em coordenadas normalizadas do sensor; null = foco contínuo. */
         val focusPoint: PointF? = null,
+        /** Modo Pro; null = automático. */
+        val iso: Int? = null,
+        val exposureNs: Long? = null,
+        /** Foco manual em dioptrias (1/m; 0 = infinito). Tem prioridade sobre [focusPoint]. */
+        val focusDiopters: Float? = null,
+        /** Balanço de branco em Kelvin. Tem prioridade sobre [awbMode]. */
+        val kelvin: Int? = null,
+    ) {
+        val manualExposure get() = iso != null || exposureNs != null
+    }
+
+    /** Valores que a câmera está usando agora (os automáticos, enquanto não são manuais). */
+    data class Live(
+        val iso: Int? = null,
+        val exposureNs: Long? = null,
+        val focusDiopters: Float? = null,
+        val awbGains: RggbChannelVector? = null,
+        val awbTransform: ColorSpaceTransform? = null,
     )
 
     private val manager = context.getSystemService(CameraManager::class.java)
-    private val thread = HandlerThread("GodoiCan-camera").apply { start() }
+    private val thread = HandlerThread("GodoiCam-camera").apply { start() }
     private val handler = Handler(thread.looper)
 
     private var device: CameraDevice? = null
@@ -49,6 +75,36 @@ class CameraController(context: Context, private val listener: Listener) {
 
     @Volatile var controls = Controls()
         private set
+    @Volatile var live = Live()
+        private set
+    private var firstFramePending = false
+    /** Duração de um quadro no FPS pedido: teto do tempo de exposição manual. */
+    @Volatile var frameNs = 1_000_000_000L / 30
+        private set
+
+    private val results = object : CameraCaptureSession.CaptureCallback() {
+        override fun onCaptureCompleted(s: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) {
+            if (firstFramePending) {
+                firstFramePending = false
+                listener.onFirstFrame()
+            }
+            val ctl = controls
+            val l = live
+            // Só os valores automáticos interessam: viram o ponto de partida do modo manual.
+            live = Live(
+                iso = if (ctl.manualExposure) l.iso else result.get(CaptureResult.SENSOR_SENSITIVITY) ?: l.iso,
+                exposureNs = if (ctl.manualExposure) l.exposureNs
+                else result.get(CaptureResult.SENSOR_EXPOSURE_TIME) ?: l.exposureNs,
+                focusDiopters = if (ctl.focusDiopters != null) l.focusDiopters
+                else result.get(CaptureResult.LENS_FOCUS_DISTANCE) ?: l.focusDiopters,
+                awbGains = if (ctl.kelvin != null) l.awbGains else result.get(CaptureResult.COLOR_CORRECTION_GAINS) ?: l.awbGains,
+                awbTransform = if (ctl.kelvin != null && l.awbTransform != null) l.awbTransform
+                else result.get(CaptureResult.COLOR_CORRECTION_TRANSFORM) ?: l.awbTransform,
+            )
+            // Kelvin salvo de antes: só dá para aplicar depois da primeira matriz de cor.
+            if (ctl.kelvin != null && l.awbTransform == null && live.awbTransform != null) apply(triggerFocus = false)
+        }
+    }
 
     @SuppressLint("MissingPermission")
     fun open(cameraId: String, target: Surface, fpsRange: Range<Int>, initial: Controls) {
@@ -56,6 +112,9 @@ class CameraController(context: Context, private val listener: Listener) {
             closeInternal()
             val gen = ++generation
             controls = initial
+            live = Live()
+            firstFramePending = true
+            frameNs = 1_000_000_000L / maxOf(1, fpsRange.upper)
             try {
                 chars = manager.getCameraCharacteristics(cameraId)
                 manager.openCamera(cameraId, object : CameraDevice.StateCallback() {
@@ -99,6 +158,8 @@ class CameraController(context: Context, private val listener: Listener) {
     @Suppress("DEPRECATION")
     private fun startSession(d: CameraDevice, target: Surface, fpsRange: Range<Int>, gen: Int) {
         try {
+            // RECORD: no S24 o PREVIEW não reduziu o atraso (~98 ms contra ~86 ms) e a imagem do
+            // RECORD é melhor (docs/MEDICOES.md, 24/10/2026).
             val b = d.createCaptureRequest(CameraDevice.TEMPLATE_RECORD)
             b.addTarget(target)
             b.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, fpsRange)
@@ -132,7 +193,9 @@ class CameraController(context: Context, private val listener: Listener) {
         handler.post {
             val before = controls
             controls = transform(before)
+            if (controls == before) return@post
             apply(triggerFocus = controls.focusPoint != null && controls.focusPoint != before.focusPoint)
+            listener.onControlsChanged()
         }
     }
 
@@ -152,10 +215,8 @@ class CameraController(context: Context, private val listener: Listener) {
                 b.set(CaptureRequest.SCALER_CROP_REGION, cropFor(c, zoom))
             }
 
-            b.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
-            val evRange = c.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE) ?: Range(0, 0)
-            b.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, ctl.exposure.coerceIn(evRange.lower, evRange.upper))
-            b.set(CaptureRequest.CONTROL_AE_LOCK, ctl.aeLock)
+            val manual = CameraCaps.manual(c)
+            applyExposure(b, c, ctl, manual)
 
             val flash = c.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
             b.set(
@@ -163,11 +224,7 @@ class CameraController(context: Context, private val listener: Listener) {
                 if (flash && ctl.torch) CaptureRequest.FLASH_MODE_TORCH else CaptureRequest.FLASH_MODE_OFF,
             )
 
-            val awbModes = c.get(CameraCharacteristics.CONTROL_AWB_AVAILABLE_MODES) ?: intArrayOf()
-            b.set(
-                CaptureRequest.CONTROL_AWB_MODE,
-                if (ctl.awbMode in awbModes) ctl.awbMode else CaptureRequest.CONTROL_AWB_MODE_AUTO,
-            )
+            applyWhiteBalance(b, c, ctl, manual)
 
             val eis = c.get(CameraCharacteristics.CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES) ?: intArrayOf()
             if (CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON in eis) {
@@ -183,10 +240,18 @@ class CameraController(context: Context, private val listener: Listener) {
                 b.set(CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE, CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON)
             }
 
-            applyFocus(b, c, ctl.focusPoint, zoom)
-            s.setRepeatingRequest(b.build(), null, handler)
+            applyProcessing(b, c)
 
-            if (triggerFocus && ctl.focusPoint != null) {
+            val manualFocus = ctl.focusDiopters != null && manual.focusDiopters > 0f
+            if (manualFocus) {
+                b.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
+                b.set(CaptureRequest.LENS_FOCUS_DISTANCE, ctl.focusDiopters!!.coerceIn(0f, manual.focusDiopters))
+            } else {
+                applyFocus(b, c, ctl.focusPoint, zoom)
+            }
+            s.setRepeatingRequest(b.build(), results, handler)
+
+            if (triggerFocus && ctl.focusPoint != null && !manualFocus) {
                 b.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_START)
                 s.capture(b.build(), null, handler)
                 b.set(CaptureRequest.CONTROL_AF_TRIGGER, CaptureRequest.CONTROL_AF_TRIGGER_IDLE)
@@ -194,6 +259,80 @@ class CameraController(context: Context, private val listener: Listener) {
         } catch (e: Exception) {
             listener.onCameraError("Falha ao aplicar ajustes: ${e.message}")
         }
+    }
+
+    /**
+     * O Camera2 não tem "ISO manual com obturador automático": com qualquer um dos dois manual,
+     * a exposição automática desliga e o outro fica no último valor automático.
+     */
+    private fun applyExposure(b: CaptureRequest.Builder, c: CameraCharacteristics, ctl: Controls, manual: CameraCaps.Manual) {
+        val isoRange = manual.iso
+        val expRange = manual.exposureNs
+        if (ctl.manualExposure && isoRange != null && expRange != null) {
+            val l = live
+            b.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF)
+            b.set(CaptureRequest.SENSOR_SENSITIVITY, (ctl.iso ?: l.iso ?: DEFAULT_ISO).coerceIn(isoRange.lower, isoRange.upper))
+            val maxExposure = maxOf(expRange.lower, minOf(expRange.upper, frameNs))
+            b.set(CaptureRequest.SENSOR_EXPOSURE_TIME, (ctl.exposureNs ?: l.exposureNs ?: (frameNs / 2)).coerceIn(expRange.lower, maxExposure))
+            b.set(CaptureRequest.SENSOR_FRAME_DURATION, frameNs)
+            return
+        }
+        b.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON)
+        val evRange = c.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE) ?: Range(0, 0)
+        b.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, ctl.exposure.coerceIn(evRange.lower, evRange.upper))
+        b.set(CaptureRequest.CONTROL_AE_LOCK, ctl.aeLock)
+    }
+
+    private fun applyWhiteBalance(b: CaptureRequest.Builder, c: CameraCharacteristics, ctl: Controls, manual: CameraCaps.Manual) {
+        val kelvin = ctl.kelvin
+        val transform = live.awbTransform
+        val gains = if (kelvin != null && manual.kelvin && transform != null) WhiteBalance.gains(c, kelvin) else null
+        if (gains != null) {
+            b.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_OFF)
+            b.set(CaptureRequest.COLOR_CORRECTION_MODE, CaptureRequest.COLOR_CORRECTION_MODE_TRANSFORM_MATRIX)
+            b.set(CaptureRequest.COLOR_CORRECTION_GAINS, gains)
+            b.set(CaptureRequest.COLOR_CORRECTION_TRANSFORM, transform)
+            return
+        }
+        val awbModes = c.get(CameraCharacteristics.CONTROL_AWB_AVAILABLE_MODES) ?: intArrayOf()
+        b.set(
+            CaptureRequest.CONTROL_AWB_MODE,
+            if (ctl.awbMode in awbModes) ctl.awbMode else CaptureRequest.CONTROL_AWB_MODE_AUTO,
+        )
+    }
+
+    /**
+     * Processamento de vídeo barato: NR FAST (não HIGH_QUALITY) e nitidez FAST.
+     * HIGH_QUALITY e filtro na GPU foram testados no S24 e travaram o envio.
+     */
+    private fun applyProcessing(b: CaptureRequest.Builder, c: CameraCharacteristics) {
+        // FAST: feito para vídeo. HIGH_QUALITY no S24 em 4K/1440p soma atraso no sensor.
+        setPreferred(
+            b, CaptureRequest.NOISE_REDUCTION_MODE,
+            c.get(CameraCharacteristics.NOISE_REDUCTION_AVAILABLE_NOISE_REDUCTION_MODES),
+            CaptureRequest.NOISE_REDUCTION_MODE_FAST,
+        )
+        setPreferred(
+            b, CaptureRequest.HOT_PIXEL_MODE,
+            c.get(CameraCharacteristics.HOT_PIXEL_AVAILABLE_HOT_PIXEL_MODES),
+            CaptureRequest.HOT_PIXEL_MODE_FAST,
+        )
+        setPreferred(
+            b, CaptureRequest.EDGE_MODE,
+            c.get(CameraCharacteristics.EDGE_AVAILABLE_EDGE_MODES),
+            CaptureRequest.EDGE_MODE_FAST,
+            CaptureRequest.EDGE_MODE_OFF,
+        )
+    }
+
+    private fun setPreferred(
+        b: CaptureRequest.Builder,
+        key: CaptureRequest.Key<Int>,
+        available: IntArray?,
+        vararg preferred: Int,
+    ) {
+        val pick = preferred.firstOrNull { available != null && it in available } ?: return
+        b.set(key, pick)
     }
 
     private fun applyFocus(b: CaptureRequest.Builder, c: CameraCharacteristics, point: PointF?, zoom: Float) {
@@ -269,5 +408,9 @@ class CameraController(context: Context, private val listener: Listener) {
     fun release() {
         close()
         thread.quitSafely()
+    }
+
+    private companion object {
+        const val DEFAULT_ISO = 100
     }
 }

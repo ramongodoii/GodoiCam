@@ -10,7 +10,7 @@ std::wstring AppDataFile(const wchar_t* name) {
     std::wstring path;
     if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &dir))) path = dir;
     CoTaskMemFree(dir);
-    path += L"\\GodoiCan";
+    path += L"\\GodoiCam";
     CreateDirectoryW(path.c_str(), nullptr);
     return path + L"\\" + name;
 }
@@ -21,7 +21,7 @@ void Log(const char* fmt, ...) {
         PWSTR dir = nullptr;
         FILE* f = nullptr;
         if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &dir))) {
-            std::wstring path = std::wstring(dir) + L"\\GodoiCan";
+            std::wstring path = std::wstring(dir) + L"\\GodoiCam";
             CreateDirectoryW(path.c_str(), nullptr);
             path += L"\\log.txt";
             f = _wfsopen(path.c_str(), L"w", _SH_DENYWR);
@@ -86,7 +86,7 @@ bool Conn::Connect(const std::string& host, uint16_t port, int timeoutMs, std::w
     if (r <= 0 || FD_ISSET(s, &failed)) {
         closesocket(s);
         error = r == 0 ? L"O celular não respondeu (" + Widen(host) + L")."
-                       : L"Conexão recusada por " + Widen(host) + L". O GodoiCan está aberto no celular?";
+                       : L"Conexão recusada por " + Widen(host) + L". O GodoiCam está aberto no celular?";
         return false;
     }
     nonblocking = 0;

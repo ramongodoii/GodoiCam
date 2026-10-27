@@ -14,7 +14,7 @@ std::wstring PairStore::Path() {
     std::wstring dir;
     if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &appData))) dir = appData;
     CoTaskMemFree(appData);
-    dir += L"\\GodoiCan";
+    dir += L"\\GodoiCam";
     CreateDirectoryW(dir.c_str(), nullptr);
     return dir + L"\\pairs.dat";
 }
@@ -71,7 +71,7 @@ void PairStore::Save() {
     for (auto& [id, p] : m_phones) s << "phone " << id << " " << crypto::Hex(p.key) << " " << p.name << "\n";
     std::string text = s.str();
     DATA_BLOB in{(DWORD)text.size(), (BYTE*)text.data()}, out{};
-    if (!CryptProtectData(&in, L"GodoiCan", nullptr, nullptr, nullptr, 0, &out)) return;
+    if (!CryptProtectData(&in, L"GodoiCam", nullptr, nullptr, nullptr, 0, &out)) return;
     std::ofstream f(Path(), std::ios::binary | std::ios::trunc);
     f.write((const char*)out.pbData, out.cbData);
     LocalFree(out.pbData);

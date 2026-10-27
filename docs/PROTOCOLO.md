@@ -1,4 +1,4 @@
-# Protocolo GodoiCan v1
+# Protocolo GodoiCam v1
 
 Celular = servidor. PC = cliente. Tudo em big-endian.
 
@@ -31,7 +31,7 @@ Strings: `u16 tamanho` + UTF-8.
 
 | Tipo | Direção | Conteúdo |
 |---|---|---|
-| 0x01 HELLO | PC→Cel | `"GDCN"`, u16 versão=1, pcId[16], u8 flags (bit0 = forçar pareamento), pcNonce[16], pcPub[65] (P-256 não comprimido), str nomePC, u32 caps |
+| 0x01 HELLO | PC→Cel | `"GDCN"`, u16 versão=1, pcId[16], u8 flags (bit0 = forçar pareamento), pcNonce[16], pcPub[65] (P-256 não comprimido), str nomePC, u32 caps (bit0 = o PC envia FRAME_ACK) |
 | 0x02 CHALLENGE | Cel→PC | phoneId[16], phoneNonce[16], str nomeCel (já pareados) |
 | 0x03 PAIR_CHALLENGE | Cel→PC | phoneId[16], phoneNonce[16], phonePub[65], str nomeCel (precisa de código) |
 | 0x04 AUTH | PC→Cel | mac[32] |
@@ -85,5 +85,55 @@ AAD = byte do tipo.
 | 0x13 PONG | Cel→PC | i64 tempo do PC µs, i64 tempo do celular µs (mesmo relógio do pts) |
 | 0x14 KEYFRAME_REQ | PC→Cel | vazio |
 | 0x15 BYE | ambos | vazio |
+| 0x16 REPORT | Cel→PC | texto UTF-8 (relatório do aparelho) |
+| 0x17 STATS | Cel→PC | estatísticas de 1 s; campos novos só são acrescentados no fim |
+| 0x18 FRAME_ACK | PC→Cel | i64 pts do VIDEO recebido (não enviado para SPS/PPS) |
+| 0x19 CONTROL | PC→Cel | u8 chave, u32 valor com sinal (controle remoto da câmera, abaixo) |
+| 0x1A CAMERA_STATE | Cel→PC | estado da câmera (abaixo); enviado ao iniciar a sessão, ao abrir a câmera e a cada ajuste |
+
+Quem não conhece um tipo o ignora, então PC e celular de versões diferentes continuam funcionando (só sem o controle remoto).
+
+### Controle remoto da câmera (CONTROL)
+
+| Chave | Valor |
+|---|---|
+| 1 trocar câmera | ignorado |
+| 2 lanterna | 0 / 1 |
+| 3 zoom | zoom × 100 |
+| 4 compensação de exposição | passos da câmera (ver `passos por EV`) |
+| 5 ISO | 0 = automático |
+| 6 tempo de exposição | µs; 0 = automático |
+| 7 foco | dioptrias × 100 (0 = infinito); negativo = automático |
+| 8 temperatura de cor | Kelvin; 0 = automático |
+| 9 tudo automático | ignorado (exposição, foco e branco voltam ao automático) |
+
+O Camera2 não combina ISO manual com obturador automático: com qualquer um dos dois manual, a exposição automática desliga e o outro fica no último valor automático.
+
+### CAMERA_STATE
+
+```
+str  nome da câmera ("Traseira", "Frontal"…)
+u8   número de câmeras
+u8   flags: bit0 tem lanterna, bit1 lanterna ligada, bit2 aceita ISO/obturador manual,
+            bit3 aceita foco manual, bit4 aceita Kelvin, bit5 foco calibrado (dioptrias reais)
+u16  zoom × 100, u16 zoom mínimo × 100, u16 zoom máximo × 100
+i16  compensação atual, i16 mínima, i16 máxima (passos), u16 passos por EV
+u16  ISO (0 = automático), u16 ISO mínimo, u16 ISO máximo
+u32  exposição µs (0 = automático), u32 mínima, u32 máxima (já limitada a um quadro do FPS atual)
+u16  foco × 100 (0xFFFF = automático), u16 foco mais próximo × 100 (0 = foco fixo)
+u16  Kelvin (0 = automático)
+```
 
 O PC manda PING a cada segundo. O celular encerra a sessão após 10 s sem receber nada.
+
+### Controle de congestionamento (com caps bit0)
+
+O PC confirma cada VIDEO assim que o lê do socket, antes de decodificar. O celular:
+
+- limita o vídeo em trânsito (enviado e ainda não confirmado) a ~200 ms do bitrate atual (mínimo 192 KB). O quadro que não cabe espera na fila do app, onde pode ser descartado; o buffer do sistema fica em 1 MB só para não limitar a vazão;
+- mede o atraso envio → confirmação. Média suavizada acima de 120 ms, ou quadro esperando mais de 100 ms pela janela, conta como congestionamento leve (bitrate × 0,8). Quadros descartados (fila com 8 ou espera acima de 300 ms) contam como severo (bitrate × 0,6 e quadro-chave). O FPS só cai quando o bitrate já está no piso (1/4 do alvo);
+- recupera depois de 2 s sem congestionamento: +5 fps por segundo até o alvo, depois bitrate +10% por segundo (+35% quando o atraso até o PC está abaixo de 30 ms).
+
+Sem o bit (PC antigo), o celular usa o modo anterior: buffer de envio de 64 KB e congestionamento pelo tamanho da fila.
+
+No PC, se um quadro espera mais de 150 ms para ser decodificado (ou há mais de 6 na fila), ele pula até o próximo quadro-chave e pede um, para voltar ao tempo real.

@@ -1,4 +1,4 @@
-package com.godoi.godoican
+package com.godoi.godoicam
 
 import android.os.Handler
 import android.os.Looper
@@ -12,8 +12,14 @@ object Hub {
         val pairingPc: String? = null,
         val addresses: String = "",
         val video: String = "",
+        /** Tamanho que a câmera entrega à GPU (pode ser maior que o vídeo enviado). */
+        val cameraSize: String = "",
         val stats: String = "",
         val message: String? = null,
+        /** Muda a cada ajuste de câmera aplicado (pela tela ou pelo PC). */
+        val controlsRev: Int = 0,
+        /** Quanto levou a última troca de câmera ou resolução até o primeiro quadro (ms). */
+        val lastSwitchMs: Long? = null,
     )
 
     private val main = Handler(Looper.getMainLooper())

@@ -176,13 +176,13 @@ const std::vector<BYTE>& FrameSource::Placeholder(UINT32 width, UINT32 height, c
         HGDIOBJ oldFont = SelectObject(dc, title);
         SetTextColor(dc, RGB(244, 245, 247));
         RECT t{0, cy + r + (LONG)height / 30, (LONG)width, (LONG)height};
-        DrawTextW(dc, L"GodoiCan", -1, &t, DT_CENTER | DT_TOP | DT_SINGLELINE);
+        DrawTextW(dc, L"GodoiCam", -1, &t, DT_CENTER | DT_TOP | DT_SINGLELINE);
         SelectObject(dc, body);
         SetTextColor(dc, RGB(169, 174, 184));
         RECT m{0, t.top + (LONG)height / 8, (LONG)width, (LONG)height};
         DrawTextW(dc,
-                  appRunning ? L"Aguardando o celular… Abra o GodoiCan no Android."
-                             : L"Abra o GodoiCan no PC para usar o celular como webcam.",
+                  appRunning ? L"Aguardando o celular… Abra o GodoiCam no Android."
+                             : L"Abra o GodoiCam no PC para usar o celular como webcam.",
                   -1, &m, DT_CENTER | DT_TOP | DT_SINGLELINE);
         SelectObject(dc, oldFont);
         DeleteObject(title);

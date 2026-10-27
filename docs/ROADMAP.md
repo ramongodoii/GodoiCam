@@ -1,4 +1,4 @@
-# GodoiCan — roteiro de melhorias por fase
+# GodoiCam — roteiro de melhorias por fase
 
 Objetivo: chegar à experiência do Iriun (abre o app no celular e já conecta; a janela do PC é só o vídeo), com menos atraso e mais qualidade. Uma fase por vez; cada fase só termina quando os testes dela passarem no **S24 (SM‑S921B)** e no PC real.
 
@@ -36,10 +36,10 @@ Sem números não dá para saber se uma mudança melhorou o atraso ou a qualidad
 - **[Falta]** Tela/linha de diagnóstico ligável (celular e PC): FPS da câmera, FPS enviado, bitrate real, quadros descartados, tempo de encode, RTT, atraso estimado, temperatura do celular.
 - **[Falta]** Registro no celular equivalente ao `log.txt` do PC (sem imagem nem chaves), exportável por "Compartilhar".
 - **[Analisar]** Capacidades reais do S24: tamanhos e FPS da câmera traseira/frontal/ultra‑angular, encoders (`c2.exynos`/`c2.qti`), perfis H.264/HEVC, suporte a `KEY_LOW_LATENCY`, intra‑refresh, CBR. Gerar um relatório pelo próprio app (botão "Copiar relatório do aparelho").
-- **[Analisar]** Instalar a câmera virtual (`instalar.cmd`) e confirmar se "GodoiCan" aparece e mostra imagem no app Câmera do Windows, Zoom, Teams, Meet e OBS. **Ainda não foi testado.**
-- **[Testar]** Atraso "vidro a vidro": filmar com outro celular, em câmera lenta, um cronômetro na tela do PC e a imagem dele passando pelo GodoiCan. Anotar p50/p95 em Wi‑Fi 5 GHz, 2,4 GHz e USB, a 720p30 e 1080p30. Fazer o mesmo com o Iriun para ter a referência.
+- **[Analisar]** Instalar a câmera virtual (`instalar.cmd`) e confirmar se "GodoiCam" aparece e mostra imagem no app Câmera do Windows, Zoom, Teams, Meet e OBS. **Ainda não foi testado.**
+- **[Testar]** Atraso "vidro a vidro": filmar com outro celular, em câmera lenta, um cronômetro na tela do PC e a imagem dele passando pelo GodoiCam. Anotar p50/p95 em Wi‑Fi 5 GHz, 2,4 GHz e USB, a 720p30 e 1080p30. Fazer o mesmo com o Iriun para ter a referência.
 
-**Pronto quando:** existe uma tabela de base (atraso, FPS, bitrate, temperatura em 10 min) para GodoiCan e Iriun no mesmo PC e celular.
+**Pronto quando:** existe uma tabela de base (atraso, FPS, bitrate, temperatura em 10 min) para GodoiCam e Iriun no mesmo PC e celular.
 
 ---
 
@@ -52,7 +52,8 @@ Sem números não dá para saber se uma mudança melhorou o atraso ou a qualidad
 > - O celular se anuncia na rede a cada 2 s enquanto espera um PC; o PC reage na hora.
 > - Queda curta: a câmera virtual segura o último quadro por 3 s e a sessão reconecta.
 > - Testado: reconexão depois de reiniciar o app do celular; pareamento novo pela tela do PC.
-> - **Pendente:** trocar de Wi‑Fi para USB sozinho quando o cabo é ligado no meio da transmissão; testar o anúncio no S24 real.
+> - ✅ (25/10/2026) Cabo ligado no meio da transmissão automática pelo Wi‑Fi: o PC troca sozinho para o USB (a câmera virtual segura o último quadro na troca). Cabo tirado: volta na hora para o Wi‑Fi. Se o USB falhar (app não responde pelo cabo, outro aparelho no adb), o Wi‑Fi assume e o cabo só é tentado de novo depois de 60 s. IP digitado à mão não é trocado.
+> - **Pendente:** testar a troca no S24 real.
 
 - **[Melhorar]** PC conecta sozinho a qualquer celular **pareado** que aparecer na rede ou no USB, sem depender de "último celular".
 - **[Melhorar]** Primeiro pareamento sem botão: ao achar um celular não pareado, o PC já abre a etapa do código (campo grande, foco automático). No celular, o código aparece em tela cheia.
@@ -81,7 +82,7 @@ Sem números não dá para saber se uma mudança melhorou o atraso ou a qualidad
 - **[Falta]** Barra superior discreta: seletor de aparelho ("S24 de Ramon [Wi‑Fi]" / "[USB]") e menu ☰ com: resolução/FPS, espelhar, câmera, instalar câmera, esquecer aparelhos, iniciar com o Windows, sobre.
 - **[Falta]** Tela "Nenhum celular" no estilo Iriun: mensagem clara + dicas + opções.
 - **[Falta]** Ícone na bandeja do sistema, iniciar minimizado, opção "Iniciar com o Windows".
-- **[Falta]** Opção "Vídeo preto sem conexão" (hoje a câmera virtual mostra a tela de espera do GodoiCan).
+- **[Falta]** Opção "Vídeo preto sem conexão" (hoje a câmera virtual mostra a tela de espera do GodoiCam).
 - **[Melhorar]** Estatísticas fora do caminho: só no menu ou numa sobreposição ligável.
 - **[Testar]** Redimensionar, maximizar, monitor com escala 100%/150%/200%, girar o celular: nada pisca nem sai do lugar.
 
@@ -125,6 +126,13 @@ Aqui "sincronia" = a imagem do PC acompanhar o celular sem tremer, travar ou atr
 
 ## Fase 5 — Diminuir o atraso
 
+> **Status (25/10/2026): em andamento — 1080p ~100 ms e 4K 125–200 ms captura→PC no S24, sem quadros descartados no PC com a GPU. No 4K o maior pedaço é a codificação no celular (~110 ms).**
+> - Confirmação por quadro (`FRAME_ACK`) e janela de envio no celular; congestionamento corta bitrate antes de FPS; quadro‑chave só a pedido; recuperação rápida do bitrate com a rede boa.
+> - PC: rede, decodificação e prévia em threads separadas; pula até o quadro‑chave se a decodificação atrasar.
+> - ✅ Decodificação por hardware (D3D11/DXVA) com volta para a CPU: 4K 21,6 → 8,2 ms, 1080p 9,6 → 3,0 ms (`docs/MEDICOES.md`).
+> - `TEMPLATE_PREVIEW` testado e descartado (não reduziu o atraso); câmera continua em `TEMPLATE_RECORD`.
+> - **Pendente:** encoder `.wfd`, UDP no Wi‑Fi, entregar à câmera virtual a resolução pedida — só se as medições pedirem.
+
 Cada item deve ser medido com a tabela da Fase 0 antes e depois.
 
 - **[Analisar]** Onde o tempo está: captura → GPU → encode → rede → decode → câmera virtual → app. Adicionar timestamps por etapa.
@@ -139,6 +147,13 @@ Cada item deve ser medido com a tabela da Fase 0 antes e depois.
 
 ## Fase 6 — Qualidade da imagem
 
+> **Status (25/10/2026): em andamento.**
+> - ✅ Celular em pé preenchendo o 16:9: a câmera captava 1920×1080 e o recorte em pé (1080×608) era ampliado 1,78× para o 1080p. Agora, com "preencher" ligado, a câmera capta numa saída cujo lado curto cobre a largura do vídeo (4K para 1080p, 1440p para 720p) e a GPU reduz; deitado, a redução 2× também deixa a imagem mais nítida. O tamanho captado aparece nos detalhes do selo ("Câmera captando em …").
+> - ✅ Cor: o encoder agora recebe BT.709 + faixa limitada + SDR explicitamente (é o que a prévia e a câmera virtual do PC supõem). O PC lê o SPS de cada quadro‑chave e registra no `log.txt` "cor do vídeo: …", avisando se for diferente (`app/H264Sps.h`, conferido com vídeos do ffmpeg em BT.709 limitada, BT.601 cheia e sem VUI).
+> - Já estava feito: `highp` nas coordenadas do shader.
+> - Chiado: bitrate "Alta" ~15 Mbps e NR `FAST` da câmera (modo de vídeo). O bilateral 5×5 na GPU + "pouca luz" forçada **travou** no S24 (envio 6–10 fps, atraso 500–900 ms, `stats.csv` 22:01) e foi revertido. Captura em pé limitada a 1440p para 1080p (4K dobrava a codificação).
+> - **Pendente:** chiado da frontal em ambiente interno sem mexer de novo no pipeline até o FPS voltar a 30 estável.
+
 - **[Analisar]** Comparar lado a lado com o Iriun no mesmo cenário (rosto, pouca luz, movimento, texto) gravando a saída das duas câmeras virtuais no OBS.
 - **[Melhorar]** Usar o tamanho de sensor ideal (hoje escolhe o menor ≥ saída; avaliar um maior com redução na GPU para mais nitidez).
 - **[Melhorar]** Shader com precisão alta nas coordenadas (`highp`) para não perder nitidez em 1080p/4K.
@@ -151,7 +166,13 @@ Cada item deve ser medido com a tabela da Fase 0 antes e depois.
 
 ## Fase 7 — Ajustes rápidos e completos
 
-> **Adiantado na Fase 3:** capacidades da câmera/encoder em cache e qualidade muda o bitrate na hora (sem reiniciar). O resto continua pendente.
+> **Status (25/10/2026): Modo Pro e controle pelo PC testados no S24 e aprovados.**
+> - ✅ Trocar de câmera (ou ligar "pouca luz") reabre só a câmera: o encoder e a sessão continuam e o PC segura o último quadro, sem reiniciar o decodificador. O tempo da troca aparece nos detalhes do selo ("Última troca de câmera/resolução: X ms").
+> - ✅ Modo Pro no celular (folha de ajustes): ISO, obturador, foco manual e temperatura de cor em Kelvin. Cada um começa do valor que o automático está usando (sem salto na imagem) e fica salvo entre execuções. "Tudo automático" desfaz tudo.
+> - Kelvin sem a API de CCT do Android 16 (o projeto compila com o SDK 35): ganhos calculados pela calibração de cor do sensor (`media/WhiteBalance.kt`, mesma conta do DNG). O rótulo mostra a temperatura estimada do automático; se ela parecer errada no S24, a calibração do aparelho não é confiável.
+> - ✅ Controle remoto pelo PC: menu ☰ → "Câmera do celular" (trocar câmera, lanterna, zoom, exposição, ISO, obturador, foco, temperatura, tudo automático). Mensagens `CONTROL`/`CAMERA_STATE` em `docs/PROTOCOLO.md`.
+> - Adiantado na Fase 3: capacidades da câmera/encoder em cache e qualidade muda o bitrate na hora (sem reiniciar).
+> - **Pendente:** medir no S24 o tempo da troca de câmera (meta < 1 s). Trocar resolução ou FPS ainda reinicia o encoder (inevitável: o tamanho do vídeo muda).
 
 - **[Melhorar]** Calcular as capacidades da câmera e do encoder **uma vez** (em segundo plano, com cache) e nunca na thread principal.
 - **[Melhorar]** Separar o que reinicia a câmera (câmera, resolução, FPS) do que é instantâneo (exposição, balanço de branco, espelho, zoom, qualidade via `setBitrate`). Qualidade não deve reiniciar nada.
@@ -163,6 +184,8 @@ Cada item deve ser medido com a tabela da Fase 0 antes e depois.
 ---
 
 ## Fase 8 — Recursos que faltam
+
+> **Status (25/10/2026): em andamento.** Feita a troca automática Wi‑Fi → USB (ver Fase 1). Falta: áudio, vários celulares, instalador único.
 
 - **[Falta]** Áudio do microfone do celular (AAC/Opus), sincronizado com o vídeo, saindo num microfone virtual (VB‑CABLE ou driver próprio). Inclui medir o atraso A/V.
 - **[Falta]** Celular aparece como "[USB]" ou "[Wi‑Fi]" e troca automática para USB quando o cabo é ligado.
@@ -181,6 +204,8 @@ Cada item deve ser medido com a tabela da Fase 0 antes e depois.
 - Sessão longa: 1 h em chamada sem travar, sem vazamento de memória, sem atraso crescente.
 
 ---
+
+Publicação open source (o que falta para **postar**, não para copiar o Iriun): `docs/LANCAMENTO.md`.
 
 ## Ordem sugerida
 

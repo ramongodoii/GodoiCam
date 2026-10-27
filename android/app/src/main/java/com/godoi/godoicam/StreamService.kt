@@ -1,4 +1,4 @@
-package com.godoi.godoican
+package com.godoi.godoicam
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -26,18 +26,19 @@ import android.view.Surface
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
-import com.godoi.godoican.media.CameraCaps
-import com.godoi.godoican.media.CameraController
-import com.godoi.godoican.media.DeviceReport
-import com.godoi.godoican.media.GlRenderer
-import com.godoi.godoican.media.VideoEncoder
-import com.godoi.godoican.net.ClientSession
-import com.godoi.godoican.net.DiscoveryResponder
-import com.godoi.godoican.net.PairStore
-import com.godoi.godoican.net.Proto
-import com.godoi.godoican.net.StreamServer
-import com.godoi.godoican.net.Writer
-import com.godoi.godoican.net.hex
+import com.godoi.godoicam.media.CameraCaps
+import com.godoi.godoicam.media.CameraController
+import com.godoi.godoicam.media.DeviceReport
+import com.godoi.godoicam.media.GlRenderer
+import com.godoi.godoicam.media.VideoEncoder
+import com.godoi.godoicam.media.WhiteBalance
+import com.godoi.godoicam.net.ClientSession
+import com.godoi.godoicam.net.DiscoveryResponder
+import com.godoi.godoicam.net.PairStore
+import com.godoi.godoicam.net.Proto
+import com.godoi.godoicam.net.StreamServer
+import com.godoi.godoicam.net.Writer
+import com.godoi.godoicam.net.hex
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import kotlin.math.abs
@@ -58,12 +59,14 @@ class StreamService : Service(), StreamServer.Callbacks, ClientSession.Listener,
 
         @Volatile private var preview: PreviewTarget? = null
 
-        const val ACTION_STOP = "com.godoi.godoican.STOP"
+        const val ACTION_STOP = "com.godoi.godoicam.STOP"
         private const val NOTIF_STREAM = 1
         private const val NOTIF_PAIR = 2
         private const val CH_STREAM = "stream"
         private const val CH_PAIR = "pair"
         private const val MIN_ENCODE_FPS = 10
+        /** Atraso até o PC abaixo disso: a rede tem folga para recuperar o bitrate rápido. */
+        private const val FAST_RECOVERY_DELAY_MS = 30
 
         fun start(context: Context) {
             ContextCompat.startForegroundService(context, Intent(context, StreamService::class.java))
@@ -84,7 +87,7 @@ class StreamService : Service(), StreamServer.Callbacks, ClientSession.Listener,
     lateinit var pairs: PairStore
         private set
 
-    private val ctrlThread = HandlerThread("GodoiCan-ctrl").apply { start() }
+    private val ctrlThread = HandlerThread("GodoiCam-ctrl").apply { start() }
     private val ctrl = Handler(ctrlThread.looper)
 
     @Volatile private var renderer: GlRenderer? = null
@@ -99,6 +102,11 @@ class StreamService : Service(), StreamServer.Callbacks, ClientSession.Listener,
         private set
     @Volatile var characteristics: CameraCharacteristics? = null
         private set
+    private var cameraCount = 1
+    /** "Preencher" com que o tamanho da câmera foi escolhido (muda o tamanho ideal). */
+    private var camSizeFill = true
+    /** Início da última troca de câmera/resolução (0 = nenhuma em andamento), para medir o tempo. */
+    @Volatile private var switchStartedAt = 0L
     @Volatile private var realtimeClock = false
     private var started = false
 
@@ -270,7 +278,8 @@ class StreamService : Service(), StreamServer.Callbacks, ClientSession.Listener,
             ?: resolutions.first()
         settings.width = res.width
         settings.height = res.height
-        val camSize = CameraCaps.cameraSize(c, res.width, res.height, settings.fps)
+        val camSize = CameraCaps.cameraSize(c, res.width, res.height, settings.fps, coverPortrait = settings.fill)
+        camSizeFill = settings.fill
 
         camInfo = info
         characteristics = c
@@ -287,6 +296,7 @@ class StreamService : Service(), StreamServer.Callbacks, ClientSession.Listener,
         cameraSurface?.release()
         val surface = Surface(st)
         cameraSurface = surface
+        cameraCount = cams.size
         cam.open(
             info.id, surface, CameraCaps.fpsRange(c, settings.fps, settings.lowLight),
             CameraController.Controls(
@@ -294,10 +304,17 @@ class StreamService : Service(), StreamServer.Callbacks, ClientSession.Listener,
                 exposure = settings.exposure,
                 awbMode = settings.awbMode,
                 stabilization = settings.stabilization,
+                iso = settings.iso,
+                exposureNs = settings.exposureNs,
+                focusDiopters = settings.focusDiopters,
+                kelvin = settings.kelvin,
             ),
         )
         Hub.update {
-            it.copy(video = "${info.label} • ${res.width}×${res.height} • ${settings.fps} fps • ${AppSettings.QUALITY_NAMES[settings.quality]}")
+            it.copy(
+                video = "${info.label} • ${res.width}×${res.height} • ${settings.fps} fps • ${AppSettings.QUALITY_NAMES[settings.quality]}",
+                cameraSize = "${camSize.width}×${camSize.height}",
+            )
         }
     }
 
@@ -328,6 +345,13 @@ class StreamService : Service(), StreamServer.Callbacks, ClientSession.Listener,
 
     override fun onCameraReady() {
         Hub.update { if (it.message?.contains("câmera", ignoreCase = true) == true) it.copy(message = null) else it }
+        sendCameraStateSoon()
+    }
+
+    override fun onControlsChanged() {
+        camera?.controls?.let { settings.save(it) }
+        Hub.update { it.copy(controlsRev = it.controlsRev + 1) }
+        sendCameraStateSoon()
     }
 
     override fun onCameraError(message: String) {
@@ -348,26 +372,57 @@ class StreamService : Service(), StreamServer.Callbacks, ClientSession.Listener,
     }
 
     private fun restartNow() {
+        switchStartedAt = SystemClock.elapsedRealtime()
         stopEncoder()
         camera?.close()
         openCamera()
         session?.let { startEncoder(it) }
     }
 
+    /**
+     * Reabre só a câmera (outra lente ou outra faixa de FPS). O encoder e a sessão continuam:
+     * o PC segura o último quadro durante a troca e não precisa reiniciar o decodificador.
+     * Se a câmera nova não aceitar a resolução ou o FPS atuais, reinicia tudo.
+     */
+    fun reopenCamera() {
+        ctrl.post {
+            val before = Triple(settings.width, settings.height, settings.fps)
+            switchStartedAt = SystemClock.elapsedRealtime()
+            camera?.close()
+            openCamera()
+            val s = session
+            if (Triple(settings.width, settings.height, settings.fps) != before && s != null) startEncoder(s)
+        }
+    }
+
+    override fun onFirstFrame() {
+        val started = switchStartedAt
+        if (started == 0L) return
+        switchStartedAt = 0L
+        val ms = SystemClock.elapsedRealtime() - started
+        Hub.update { it.copy(lastSwitchMs = ms) }
+    }
+
     fun switchCamera() {
         val cams = cameras()
         if (cams.size < 2) return
         val i = cams.indexOfFirst { it.id == settings.cameraId }
-        settings.cameraId = cams[(i + 1) % cams.size].id
+        selectCamera(cams[(i + 1) % cams.size].id)
+    }
+
+    /** Troca de câmera: zoom e foco manual são da lente, então voltam ao padrão. */
+    fun selectCamera(id: String) {
+        settings.cameraId = id
         settings.zoom = 1f
-        restartPipeline()
+        settings.focusDiopters = null
+        reopenCamera()
     }
 
     /** Qualidade (bitrate) muda na hora, sem reiniciar câmera nem encoder. */
     fun applyQuality() {
         ctrl.post {
             targetBitrate = settings.bitrate()
-            encoder?.setBitrate(targetBitrate)
+            encoder?.let { setEncoderBitrate(it, targetBitrate) }
             Hub.update {
                 it.copy(video = it.video.substringBeforeLast(" • ") + " • ${AppSettings.QUALITY_NAMES[settings.quality]}")
             }
@@ -375,7 +430,9 @@ class StreamService : Service(), StreamServer.Callbacks, ClientSession.Listener,
     }
 
     fun updateTransform() {
-        ctrl.post { applyTransform() }
+        ctrl.post {
+            if (settings.fill != camSizeFill && camera != null) reopenCamera() else applyTransform()
+        }
     }
 
     fun updateControls(transform: (CameraController.Controls) -> CameraController.Controls) {
@@ -386,8 +443,87 @@ class StreamService : Service(), StreamServer.Callbacks, ClientSession.Listener,
 
     fun focusAt(x: Float, y: Float): Boolean {
         val p = renderer?.previewToSensor(x, y) ?: return false
-        camera?.update { it.copy(focusPoint = p) }
+        camera?.update { it.copy(focusPoint = p, focusDiopters = null) }
         return true
+    }
+
+    /** Valores automáticos que a câmera está usando agora (ponto de partida do modo manual). */
+    fun liveValues(): CameraController.Live = camera?.live ?: CameraController.Live()
+
+    /** Teto do tempo de exposição manual (um quadro no FPS atual). */
+    fun frameNs(): Long = camera?.frameNs ?: (1_000_000_000L / settings.fps)
+
+    /** Temperatura estimada do balanço automático, para o Kelvin manual começar sem salto. */
+    fun autoKelvin(): Int? {
+        val c = characteristics ?: return null
+        val g = liveValues().awbGains ?: return null
+        return WhiteBalance.estimateKelvin(c, g)
+    }
+
+    // ---------------------------------------------------------------- controle pelo PC
+
+    override fun onRemoteControl(key: Int, value: Int) {
+        ctrl.post {
+            val c = characteristics ?: return@post
+            when (key) {
+                Proto.CTL_SWITCH_CAMERA -> switchCamera()
+                Proto.CTL_TORCH -> updateControls { it.copy(torch = value != 0) }
+                Proto.CTL_ZOOM -> {
+                    val range = CameraCaps.zoomRange(c)
+                    updateControls { it.copy(zoom = (value / 100f).coerceIn(range.lower, range.upper)) }
+                }
+                Proto.CTL_EV -> updateControls { it.copy(exposure = value) }
+                Proto.CTL_ISO -> updateControls { it.copy(iso = value.takeIf { v -> v > 0 }) }
+                Proto.CTL_EXPOSURE_US -> updateControls { it.copy(exposureNs = value.takeIf { v -> v > 0 }?.times(1000L)) }
+                Proto.CTL_FOCUS -> updateControls {
+                    it.copy(focusDiopters = if (value < 0) null else value / 100f, focusPoint = null)
+                }
+                Proto.CTL_KELVIN -> updateControls { it.copy(kelvin = value.takeIf { v -> v > 0 }) }
+                Proto.CTL_ALL_AUTO -> updateControls {
+                    it.copy(
+                        exposure = 0, aeLock = false, focusPoint = null,
+                        iso = null, exposureNs = null, focusDiopters = null, kelvin = null,
+                    )
+                }
+            }
+        }
+    }
+
+    private val sendCameraState = Runnable {
+        val s = session ?: return@Runnable
+        val c = characteristics ?: return@Runnable
+        val ctl = controls()
+        val manual = CameraCaps.manual(c)
+        val zoom = CameraCaps.zoomRange(c)
+        val ev = c.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE) ?: android.util.Range(0, 0)
+        val evStep = c.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_STEP)?.toDouble() ?: 1.0
+        val iso = manual.iso
+        val exp = manual.exposureNs
+        val frame = frameNs()
+        val flags = (if (c.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true) 1 else 0) or
+            (if (ctl.torch) 2 else 0) or
+            (if (iso != null && exp != null) 4 else 0) or
+            (if (manual.focusDiopters > 0f) 8 else 0) or
+            (if (manual.kelvin) 16 else 0) or
+            (if (manual.focusCalibrated) 32 else 0)
+        s.sendCameraState(
+            Writer().str(camInfo?.label ?: "Câmera").u8(cameraCount).u8(flags)
+                .u16((ctl.zoom * 100).toInt()).u16((zoom.lower * 100).toInt()).u16((zoom.upper * 100).toInt())
+                .u16(ctl.exposure and 0xffff).u16(ev.lower and 0xffff).u16(ev.upper and 0xffff)
+                .u16(if (evStep > 0) (1 / evStep).toInt().coerceIn(1, 1000) else 1)
+                .u16(ctl.iso ?: 0).u16(iso?.lower ?: 0).u16(iso?.upper ?: 0)
+                .u32(((ctl.exposureNs ?: 0L) / 1000).toInt()).u32(((exp?.lower ?: 0L) / 1000).toInt())
+                .u32((minOf(exp?.upper ?: 0L, frame) / 1000).toInt())
+                .u16(ctl.focusDiopters?.let { (it * 100).toInt() } ?: 0xffff)
+                .u16((manual.focusDiopters * 100).toInt())
+                .u16(ctl.kelvin ?: 0)
+                .build(),
+        )
+    }
+
+    private fun sendCameraStateSoon() {
+        ctrl.removeCallbacks(sendCameraState)
+        ctrl.postDelayed(sendCameraState, 50)
     }
 
     fun forgetPairs() {
@@ -417,6 +553,7 @@ class StreamService : Service(), StreamServer.Callbacks, ClientSession.Listener,
         }
         encoder = enc
         targetBitrate = enc.bitrate
+        s.bitrate = enc.bitrate
         encodeFps = fps
         s.sendConfig(
             Writer().u16(Proto.CODEC_H264).u16(w).u16(h).u16(fps).u32(enc.bitrate)
@@ -439,6 +576,7 @@ class StreamService : Service(), StreamServer.Callbacks, ClientSession.Listener,
             session.listener = this
             session.clock = ::nowUs
             startEncoder(session)
+            sendCameraStateSoon()
             Thread {
                 // Espera alguns quadros para o relatório incluir a matriz real da câmera.
                 Thread.sleep(1500)
@@ -474,23 +612,32 @@ class StreamService : Service(), StreamServer.Callbacks, ClientSession.Listener,
         encoder?.requestKeyframe()
     }
 
-    /** A rede não acompanhou: baixa o bitrate (até 1/4 do alvo) e pede um quadro-chave. */
     /**
-     * A rede não acompanhou: codifica menos quadros por segundo e baixa o bitrate. Menos
-     * quadros não exige quadro-chave (que é grande e pioraria o aperto); a imagem segue fluida.
+     * A rede não acompanhou: baixa o bitrate primeiro (a imagem fica um pouco mais suave, mas
+     * fluida). Só corta FPS quando o bitrate já está no piso, porque menos quadros é o que
+     * mais se nota numa chamada.
      */
-    override fun onCongestion() {
+    override fun onCongestion(severe: Boolean) {
         ctrl.post {
             val e = encoder ?: return@post
             lastCongestion = SystemClock.elapsedRealtime()
-            val reduced = maxOf(targetBitrate / 5, e.bitrate * 3 / 4)
-            if (reduced < e.bitrate) e.setBitrate(reduced)
-            val fps = maxOf(MIN_ENCODE_FPS, encodeFps * 2 / 3)
-            if (fps < encodeFps) {
-                encodeFps = fps
-                renderer?.setEncodeFps(fps)
+            val floor = targetBitrate / 4
+            val atFloor = e.bitrate <= floor
+            val reduced = maxOf(floor, if (severe) e.bitrate * 6 / 10 else e.bitrate * 8 / 10)
+            if (reduced < e.bitrate) setEncoderBitrate(e, reduced)
+            if (atFloor) {
+                val fps = maxOf(MIN_ENCODE_FPS, encodeFps * 3 / 4)
+                if (fps < encodeFps) {
+                    encodeFps = fps
+                    renderer?.setEncodeFps(fps)
+                }
             }
         }
+    }
+
+    private fun setEncoderBitrate(e: VideoEncoder, value: Int) {
+        e.setBitrate(value)
+        session?.bitrate = value
     }
 
     private val statsTick = object : Runnable {
@@ -507,23 +654,30 @@ class StreamService : Service(), StreamServer.Callbacks, ClientSession.Listener,
                 val bits = s.bytesSent.getAndSet(0) * 8
                 val dropped = s.framesDropped.getAndSet(0)
                 val encDelay = e.takeEncodeDelayMs()
+                val netDelay = s.takeNetDelayMs()
                 s.sendStats(
                     Writer().u16(camFps).u16(encFps).u32(bits.toInt()).u32(e.bitrate).u16(dropped.toInt())
                         .u16(s.queuedFrames()).u16(encDelay.coerceIn(-1, 30000) and 0xffff)
                         .u16(temp.coerceIn(-32768, 32767) and 0xffff).u8(thermal)
-                        .also { wifiStats(it) }.u8(encodeFps).build(),
+                        .also { wifiStats(it) }.u8(encodeFps)
+                        .u16(netDelay.coerceIn(-1, 30000) and 0xffff).build(),
                 )
-                // Recupera aos poucos depois de 3 s sem congestionamento: primeiro FPS, depois bitrate.
-                if (SystemClock.elapsedRealtime() - lastCongestion > 3000) {
+                // Recupera aos poucos depois de 2 s sem congestionamento: primeiro FPS, depois bitrate.
+                if (SystemClock.elapsedRealtime() - lastCongestion > 2000) {
                     if (encodeFps < settings.fps) {
                         encodeFps = min(settings.fps, encodeFps + 5)
                         r.setEncodeFps(encodeFps)
                     } else if (e.bitrate < targetBitrate) {
-                        e.setBitrate(min(targetBitrate, e.bitrate * 115 / 100))
+                        // Rede confirmadamente rápida: sobe mais depressa (de 1/4 ao alvo em ~5 s).
+                        val step = if (netDelay in 0..FAST_RECOVERY_DELAY_MS) 135 else 110
+                        // Em Long: 4K passa de 16 Mbps e e.bitrate × 135 estoura o Int.
+                        val raised = e.bitrate.toLong() * step / 100
+                        setEncoderBitrate(e, min(targetBitrate.toLong(), raised).toInt())
                     }
                 }
                 "Enviando $encFps fps • ${"%.1f".format(bits / 1e6)} Mbps" +
-                    (if (encDelay >= 0) " • codificação $encDelay ms" else "") + tempText +
+                    (if (encDelay >= 0) " • codificação $encDelay ms" else "") +
+                    (if (netDelay >= 0) " • rede $netDelay ms" else "") + tempText +
                     if (dropped > 0) " • $dropped quadros descartados" else ""
             } else {
                 "Câmera $camFps fps$tempText"
@@ -548,7 +702,7 @@ class StreamService : Service(), StreamServer.Callbacks, ClientSession.Listener,
         val n = NotificationCompat.Builder(this, CH_PAIR)
             .setSmallIcon(R.drawable.ic_stat)
             .setContentTitle("Código de pareamento: ${code.take(3)} ${code.drop(3)}")
-            .setContentText("Digite no GodoiCan do PC \"$pcName\"")
+            .setContentText("Digite no GodoiCam do PC \"$pcName\"")
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setContentIntent(openAppIntent())
             .setAutoCancel(true)
@@ -608,7 +762,7 @@ class StreamService : Service(), StreamServer.Callbacks, ClientSession.Listener,
 
     private fun acquireLocks() {
         val pm = getSystemService(PowerManager::class.java)
-        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "GodoiCan:stream").apply {
+        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "GodoiCam:stream").apply {
             setReferenceCounted(false)
             acquire()
         }
@@ -616,18 +770,18 @@ class StreamService : Service(), StreamServer.Callbacks, ClientSession.Listener,
         @Suppress("DEPRECATION")
         val mode = if (Build.VERSION.SDK_INT >= 29) WifiManager.WIFI_MODE_FULL_LOW_LATENCY
         else WifiManager.WIFI_MODE_FULL_HIGH_PERF
-        wifiLock = wifi.createWifiLock(mode, "GodoiCan").apply {
+        wifiLock = wifi.createWifiLock(mode, "GodoiCam").apply {
             setReferenceCounted(false)
             acquire()
         }
         // O modo de baixa latência só vale com a tela ligada; este mantém o Wi-Fi sem economia
         // de energia também com a tela apagada.
         @Suppress("DEPRECATION")
-        wifiPerfLock = wifi.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "GodoiCan-perf").apply {
+        wifiPerfLock = wifi.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "GodoiCam-perf").apply {
             setReferenceCounted(false)
             acquire()
         }
-        multicastLock = wifi.createMulticastLock("GodoiCan").apply {
+        multicastLock = wifi.createMulticastLock("GodoiCam").apply {
             setReferenceCounted(false)
             acquire()
         }
@@ -664,7 +818,7 @@ class StreamService : Service(), StreamServer.Callbacks, ClientSession.Listener,
         )
         return NotificationCompat.Builder(this, CH_STREAM)
             .setSmallIcon(R.drawable.ic_stat)
-            .setContentTitle("GodoiCan")
+            .setContentTitle("GodoiCam")
             .setContentText(text)
             .setOngoing(true)
             .setContentIntent(openAppIntent())

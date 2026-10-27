@@ -1,4 +1,4 @@
-// atraso: mede o atraso "vidro a vidro" de qualquer câmera (GodoiCan, Iriun...).
+// atraso: mede o atraso "vidro a vidro" de qualquer câmera (GodoiCam, Iriun...).
 //
 // A janela pisca entre preto e branco em tela cheia. Aponte a câmera do celular para a tela
 // (bem perto, para a tela ocupar a imagem toda). O programa lê a câmera pelo Media Foundation,
@@ -234,13 +234,13 @@ int wmain(int argc, wchar_t** argv) {
     wc.lpfnWndProc = WndProc;
     wc.hInstance = GetModuleHandleW(nullptr);
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    wc.lpszClassName = L"GodoiCanAtraso";
+    wc.lpszClassName = L"GodoiCamAtraso";
     RegisterClassW(&wc);
     HMONITOR mon = MonitorFromPoint({0, 0}, MONITOR_DEFAULTTOPRIMARY);
     MONITORINFO mi{sizeof(mi)};
     GetMonitorInfoW(mon, &mi);
     RECT r = mi.rcMonitor;
-    g_wnd = CreateWindowExW(WS_EX_TOPMOST, wc.lpszClassName, L"GodoiCan — medidor de atraso", WS_POPUP | WS_VISIBLE,
+    g_wnd = CreateWindowExW(WS_EX_TOPMOST, wc.lpszClassName, L"GodoiCam — medidor de atraso", WS_POPUP | WS_VISIBLE,
                             r.left, r.top, r.right - r.left, r.bottom - r.top, nullptr, nullptr, wc.hInstance,
                             nullptr);
     SetTimer(g_wnd, 1, 1000, nullptr);
@@ -258,7 +258,7 @@ int wmain(int argc, wchar_t** argv) {
     wprintf(L"%s\n", result.c_str());
     PWSTR dir = nullptr;
     if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &dir))) {
-        std::wstring path = std::wstring(dir) + L"\\GodoiCan\\atraso.txt";
+        std::wstring path = std::wstring(dir) + L"\\GodoiCam\\atraso.txt";
         if (FILE* f = _wfopen(path.c_str(), L"a, ccs=UTF-8")) {
             SYSTEMTIME t;
             GetLocalTime(&t);

@@ -17,7 +17,7 @@
 #include <thread>
 
 #include "FrameSource.h"
-#include "GodoiCanShared.h"
+#include "GodoiCamShared.h"
 
 using Microsoft::WRL::ChainInterfaces;
 using Microsoft::WRL::ClassicCom;

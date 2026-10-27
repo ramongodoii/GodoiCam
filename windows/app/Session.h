@@ -41,6 +41,22 @@ public:
         std::wstring stats;  // linha completa de estatísticas
     };
 
+    // Estado da câmera do celular (CAMERA_STATE), para o menu de controle remoto.
+    struct PhoneCamera {
+        bool valid = false;
+        std::wstring label;
+        int cameraCount = 1;
+        bool torchAvailable = false, torchOn = false;
+        // O que a câmera atual aceita (não o que está ligado).
+        bool manualExposure = false, manualFocus = false, kelvinAvailable = false, focusCalibrated = false;
+        int zoom = 100, zoomMin = 100, zoomMax = 100;  // × 100
+        int ev = 0, evMin = 0, evMax = 0, evPerStop = 1;  // passos da câmera
+        int iso = 0, isoMin = 0, isoMax = 0;               // 0 = automático
+        int exposureUs = 0, exposureMinUs = 0, exposureMaxUs = 0;
+        int focus = -1, focusMax = 0;  // dioptrias × 100; -1 = automático
+        int kelvin = 0;
+    };
+
     Session(PairStore& pairs, FrameWriter& writer, std::function<void()> onStatus, std::function<void()> onPreview);
     ~Session();
 
@@ -61,6 +77,10 @@ public:
         m_previewMaxH = height;
     }
     Target CurrentTarget();
+
+    PhoneCamera GetPhoneCamera();
+    // Muda um ajuste da câmera do celular (proto::CTL_*). Ignorado sem sessão autenticada.
+    void SendControl(uint8_t key, int32_t value);
 
     // Copia a prévia BGRA mais recente; falso se não há nada novo.
     bool TakePreview(std::vector<uint8_t>& bgra, int& width, int& height);
@@ -97,6 +117,7 @@ private:
     Target m_target;
     std::string m_code;
     Conn* m_conn = nullptr;
+    PhoneCamera m_camera;  // protegido por m_lock; valid só durante a recepção autenticada
 
     // Relógio do celular − relógio do PC, estimado pelo PING/PONG de menor RTT recente.
     std::atomic<int64_t> m_clockOffset{0};

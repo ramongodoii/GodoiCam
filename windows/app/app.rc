@@ -1,7 +1,7 @@
 #include <windows.h>
 #include "resource.h"
 
-IDI_APP ICON "godoican.ico"
+IDI_APP ICON "godoicam.ico"
 CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "app.manifest"
 
 VS_VERSION_INFO VERSIONINFO
@@ -14,8 +14,8 @@ BEGIN
     BEGIN
         BLOCK "041604b0"
         BEGIN
-            VALUE "FileDescription", "GodoiCan - celular como webcam"
-            VALUE "ProductName", "GodoiCan"
+            VALUE "FileDescription", "GodoiCam - celular como webcam"
+            VALUE "ProductName", "GodoiCam"
             VALUE "FileVersion", "1.0.0"
             VALUE "ProductVersion", "1.0.0"
         END

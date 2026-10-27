@@ -31,6 +31,22 @@ enum Type : uint8_t {
     BYE = 0x15,
     REPORT = 0x16,
     STATS = 0x17,
+    FRAME_ACK = 0x18,
+    CONTROL = 0x19,
+    CAMERA_STATE = 0x1A,
+};
+
+// Chaves do CONTROL (PC → celular): u8 chave, u32 valor com sinal.
+enum Control : uint8_t {
+    CTL_SWITCH_CAMERA = 1,
+    CTL_TORCH = 2,
+    CTL_ZOOM = 3,         // × 100
+    CTL_EV = 4,           // passos da câmera
+    CTL_ISO = 5,          // 0 = automático
+    CTL_EXPOSURE_US = 6,  // 0 = automático
+    CTL_FOCUS = 7,        // dioptrias × 100; negativo = automático
+    CTL_KELVIN = 8,       // 0 = automático
+    CTL_ALL_AUTO = 9,
 };
 
 enum Error : uint8_t {
@@ -43,6 +59,8 @@ enum Error : uint8_t {
 };
 
 constexpr uint8_t HELLO_FORCE_PAIR = 1;
+// Capacidades do PC (u32 no HELLO).
+constexpr uint32_t CAP_FRAME_ACK = 1;
 constexpr uint8_t VIDEO_KEY = 1;
 constexpr uint8_t VIDEO_CONFIG = 2;
 }  // namespace proto
@@ -104,9 +122,9 @@ private:
     Bytes m_frame;
 };
 
-// Registro de diagnóstico em %APPDATA%\GodoiCan\log.txt (sem conteúdo de vídeo nem chaves).
+// Registro de diagnóstico em %APPDATA%\GodoiCam\log.txt (sem conteúdo de vídeo nem chaves).
 void Log(const char* fmt, ...);
-// Caminho de um arquivo em %APPDATA%\GodoiCan (cria a pasta).
+// Caminho de um arquivo em %APPDATA%\GodoiCam (cria a pasta).
 std::wstring AppDataFile(const wchar_t* name);
 
 std::wstring Widen(const std::string& utf8);

@@ -1,4 +1,4 @@
-package com.godoi.godoican.net
+package com.godoi.godoicam.net
 
 import java.net.DatagramPacket
 import java.net.DatagramSocket
@@ -27,7 +27,7 @@ class DiscoveryResponder(private val phoneIdHex: String, private val phoneName: 
         s.broadcast = true
         s.bind(InetSocketAddress(Proto.UDP_PORT))
         socket = s
-        thread(name = "GodoiCan-discovery", isDaemon = true) {
+        thread(name = "GodoiCam-discovery", isDaemon = true) {
             val buf = ByteArray(256)
             while (!s.isClosed) {
                 try {
@@ -42,7 +42,7 @@ class DiscoveryResponder(private val phoneIdHex: String, private val phoneName: 
                 }
             }
         }
-        thread(name = "GodoiCan-announce", isDaemon = true) {
+        thread(name = "GodoiCam-announce", isDaemon = true) {
             val target = InetSocketAddress(InetAddress.getByName("255.255.255.255"), Proto.UDP_PORT)
             while (!s.isClosed) {
                 if (announce) {

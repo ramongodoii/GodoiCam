@@ -1,4 +1,4 @@
-package com.godoi.godoican.media
+package com.godoi.godoicam.media
 
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
@@ -8,7 +8,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.HandlerThread
 import android.view.Surface
-import com.godoi.godoican.net.Proto
+import com.godoi.godoicam.net.Proto
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
@@ -30,7 +30,7 @@ class VideoEncoder(
     private var delaySumUs = 0L
     private var delayCount = 0
 
-    private val thread = HandlerThread("GodoiCan-encoder").apply { start() }
+    private val thread = HandlerThread("GodoiCam-encoder").apply { start() }
     private lateinit var codec: MediaCodec
     lateinit var inputSurface: Surface
         private set
@@ -94,7 +94,9 @@ class VideoEncoder(
         f.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
         f.setInteger(MediaFormat.KEY_BIT_RATE, bitrate)
         f.setInteger(MediaFormat.KEY_FRAME_RATE, fps)
-        f.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2)
+        // TCP não perde pacotes: quadro-chave só a pedido (início, erro, descarte). Um a cada
+        // 2 s criava picos que a rede lia como congestionamento.
+        f.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, I_FRAME_INTERVAL_S)
         val enc = caps.encoderCapabilities
         f.setInteger(
             MediaFormat.KEY_BITRATE_MODE,
@@ -110,6 +112,11 @@ class VideoEncoder(
             f.setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileHigh)
             f.setInteger(MediaFormat.KEY_LEVEL, high.maxOf { it.level })
         }
+        // O PC (prévia e câmera virtual) interpreta o vídeo como BT.709 com faixa limitada; sem
+        // estas chaves cada encoder escolhe a sua conversão e a imagem fica lavada ou saturada.
+        f.setInteger(MediaFormat.KEY_COLOR_STANDARD, MediaFormat.COLOR_STANDARD_BT709)
+        f.setInteger(MediaFormat.KEY_COLOR_RANGE, MediaFormat.COLOR_RANGE_LIMITED)
+        f.setInteger(MediaFormat.KEY_COLOR_TRANSFER, MediaFormat.COLOR_TRANSFER_SDR_VIDEO)
         f.setInteger(MediaFormat.KEY_PRIORITY, 0)
         f.setInteger(MediaFormat.KEY_LATENCY, 1)
         if (Build.VERSION.SDK_INT >= 29) {
@@ -168,5 +175,9 @@ class VideoEncoder(
         } catch (_: Exception) {
         }
         thread.quitSafely()
+    }
+
+    private companion object {
+        const val I_FRAME_INTERVAL_S = 10
     }
 }

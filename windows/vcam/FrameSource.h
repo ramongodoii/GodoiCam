@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-#include "GodoiCanShared.h"
+#include "GodoiCamShared.h"
 
 // Lado da câmera virtual: lê o quadro mais recente que o app publicou na memória
 // compartilhada e o entrega no formato pedido pelo aplicativo (Zoom, Teams, OBS...).

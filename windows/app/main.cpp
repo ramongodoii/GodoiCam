@@ -1,4 +1,4 @@
-// GodoiCan para Windows. Janela no estilo "só o vídeo": uma barra fina com o seletor de
+// GodoiCam para Windows. Janela no estilo "só o vídeo": uma barra fina com o seletor de
 // celular e o menu ☰; o resto é a imagem. Conecta sozinho ao celular pareado (Wi‑Fi ou USB)
 // e continua na bandeja quando a janela é fechada.
 #include <winsock2.h>
@@ -10,7 +10,11 @@
 #include <windowsx.h>
 
 #include <atomic>
+#include <cstdarg>
+#include <cstdio>
+#include <cstdlib>
 #include <memory>
+#include <mutex>
 #include <set>
 #include <string>
 #include <thread>
@@ -51,8 +55,12 @@ enum : int {
     IDM_CAMERA,
     IDM_FORGET,
     IDM_FOLDER,
+    IDM_ABOUT,
     IDM_OPEN,
     IDM_EXIT,
+
+    IDM_CONTROL = 400,
+    IDM_CONTROL_LAST = 599,
 
     TIMER_TICK = 1,
 };
@@ -63,6 +71,9 @@ struct Choice {
     enum Kind { Phone, Usb, Ip, Current } kind;
     PhoneInfo phone;
 };
+
+// Depois de uma tentativa pelo USB que falhou, com o Wi-Fi disponível, espera isso para tentar o cabo de novo.
+constexpr ULONGLONG kUsbRetryAfterFailMs = 60000;
 
 const COLORREF kBar = RGB(32, 34, 40);
 const COLORREF kVideo = RGB(16, 17, 20);
@@ -97,6 +108,12 @@ struct App {
 
     std::set<std::string> autoPairTried;  // celulares não pareados já oferecidos nesta execução
     std::atomic<bool> usbPresent{false};
+    // Situação do cabo para orientar o usuário (sys::UsbPhone) e o nome do aparelho no Windows.
+    std::atomic<sys::UsbPhone> usbState{sys::UsbPhone::None};
+    std::mutex usbNameLock;
+    std::wstring usbName;
+    sys::UsbPhone usbStateSeen = sys::UsbPhone::None;  // última situação já tratada na janela
+    ULONGLONG usbNoticeUntil = 0;                      // aviso sobre o vídeo, quando o cabo é ligado sem depuração
     std::atomic<bool> quitting{false};
     std::thread usbThread;
     ULONGLONG nextAuto = 0;
@@ -109,6 +126,9 @@ struct App {
 
     bool trayAdded = false;
     bool trayHintShown = false;
+
+    // Itens do submenu "Câmera do celular" abertos agora: id = IDM_CONTROL + índice.
+    std::vector<std::pair<uint8_t, int32_t>> controlItems;
 } g;
 
 int S(int v) { return MulDiv(v, (int)g.dpi, 96); }
@@ -117,13 +137,13 @@ int S(int v) { return MulDiv(v, (int)g.dpi, 96); }
 
 DWORD GetPref(const wchar_t* name, DWORD def) {
     DWORD value = def, size = sizeof(value);
-    RegGetValueW(HKEY_CURRENT_USER, L"Software\\GodoiCan", name, RRF_RT_REG_DWORD, nullptr, &value, &size);
+    RegGetValueW(HKEY_CURRENT_USER, L"Software\\GodoiCam", name, RRF_RT_REG_DWORD, nullptr, &value, &size);
     return value;
 }
 
 void SetPref(const wchar_t* name, DWORD value) {
     HKEY key;
-    if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\GodoiCan", 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key,
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\GodoiCam", 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key,
                         nullptr) == ERROR_SUCCESS) {
         RegSetValueExW(key, name, 0, REG_DWORD, (const BYTE*)&value, sizeof(value));
         RegCloseKey(key);
@@ -200,7 +220,7 @@ void ShowPanel(Panel p) {
         SetWindowLongPtrW(g.panelEdit, GWL_STYLE, style & ~ES_NUMBER);
         SendMessageW(g.panelEdit, EM_SETLIMITTEXT, 40, 0);
         SendMessageW(g.panelEdit, EM_SETCUEBANNER, TRUE, (LPARAM)L"192.168.0.15");
-        SetWindowTextW(g.panelText, L"IP do celular\n(aparece no topo do app GodoiCan no celular)");
+        SetWindowTextW(g.panelText, L"IP do celular\n(aparece no topo do app GodoiCam no celular)");
         SetWindowTextW(g.panelOk, L"Conectar");
     }
     SetFocus(g.panelEdit);
@@ -254,6 +274,47 @@ void PanelCancel() {
     ShowPanel(Panel::None);
 }
 
+// ------------------------------------------------------------------------------------ cabo USB
+
+struct UsbAdvice {
+    std::wstring title, body, shortText;
+};
+
+// O que falta para o cabo funcionar; falso se o cabo está pronto ou vazio.
+bool GetUsbAdvice(UsbAdvice& a) {
+    std::wstring name;
+    {
+        std::lock_guard<std::mutex> lock(g.usbNameLock);
+        name = g.usbName;
+    }
+    std::wstring who = name.empty() ? L"O celular" : name;
+    switch (g.usbState.load()) {
+        case sys::UsbPhone::NoDebugging:
+            a.title = who + L" está no cabo, mas sem a Depuração USB";
+            a.body = L"No celular: Configurações → Opções do desenvolvedor → ligue \"Depuração USB\".\n"
+                     L"Samsung: desligue também o \"Bloqueador automático\" (Segurança e privacidade).\n"
+                     L"Sem Opções do desenvolvedor? Toque 7 vezes em \"Número de compilação\"\n"
+                     L"(Configurações → Sobre o telefone → Informações do software).";
+            a.shortText = L"ative a Depuração USB";
+            return true;
+        case sys::UsbPhone::Unauthorized:
+            a.title = L"Autorize este PC no celular";
+            a.body = L"Apareceu no celular a pergunta \"Permitir depuração USB?\".\n"
+                     L"Marque \"Sempre permitir deste computador\" e toque em Permitir.\n"
+                     L"Se a pergunta não apareceu, desconecte e conecte o cabo de novo.";
+            a.shortText = L"toque em Permitir no celular";
+            return true;
+        case sys::UsbPhone::NoAdb:
+            a.title = who + L" está no cabo, mas falta o adb no PC";
+            a.body = L"Baixe o Android platform-tools e coloque a pasta como \"adb\"\n"
+                     L"ao lado do GodoiCam.exe (fica adb\\adb.exe).";
+            a.shortText = L"falta o adb no PC";
+            return true;
+        default:
+            return false;
+    }
+}
+
 // ------------------------------------------------------------------------------------ seletor de celular
 
 void RefreshChoices() {
@@ -281,6 +342,8 @@ void RefreshChoices() {
     std::wstring usbLabel = active && cur.usb && !cur.name.empty() && cur.name != "celular (USB)"
                                 ? Widen(cur.name) + L"  [USB]"
                                 : std::wstring(L"Celular pelo cabo USB");
+    UsbAdvice advice;
+    if (!(active && cur.usb) && GetUsbAdvice(advice)) usbLabel += L"  • " + advice.shortText;
     if (active && cur.usb) selected = (int)g.choices.size();
     g.choices.push_back({Choice::Usb, {}});
     ComboBox_AddString(g.combo, usbLabel.c_str());
@@ -319,28 +382,51 @@ void OnChoice() {
 
 // ------------------------------------------------------------------------------------ conexão automática
 
+// Cabo ligado no meio de uma transmissão automática pelo Wi-Fi: passa para o USB (menos
+// atraso e sem os soluços do Wi-Fi). O celular derruba a sessão antiga do mesmo PC sozinho e
+// a câmera virtual segura o último quadro durante a troca. IP digitado à mão não é trocado.
+bool SwitchToUsb(ULONGLONG now) {
+    if (!g.usbPresent || !g.session->Streaming() || now - g.lastUsbFail < kUsbRetryAfterFailMs) return false;
+    Target cur = g.session->CurrentTarget();
+    if (cur.usb || cur.persistent) return false;
+    Log("cabo USB detectado durante a transmissão pelo Wi-Fi: trocando para o USB");
+    Target t;
+    t.usb = true;
+    t.name = cur.name.empty() ? "celular (USB)" : cur.name;
+    t.automatic = true;
+    Start(t);
+    return true;
+}
+
 // Chamado a cada segundo: se nada está conectado, escolhe sozinho USB > celular pareado >
 // único celular não pareado (abre o código uma vez por execução).
 void AutoTick() {
-    if (g.session->Active() || g.userStopped || !g.pairs.AutoConnect() || g.panel != Panel::None) return;
+    if (g.userStopped || !g.pairs.AutoConnect() || g.panel != Panel::None) return;
     ULONGLONG now = GetTickCount64();
     if (now < g.nextAuto) return;
-    g.nextAuto = now + 2000;
-
-    if (g.usbPresent && now - g.lastUsbFail > 3000) {
-        Target t;
-        t.usb = true;
-        t.name = "celular (USB)";
-        t.automatic = true;
-        Start(t);
+    if (g.session->Active()) {
+        if (SwitchToUsb(now)) g.nextAuto = now + 2000;
         return;
     }
+    g.nextAuto = now + 2000;
+
     std::string last = g.pairs.LastPhone();
     const PhoneInfo* pick = nullptr;
     for (auto& p : g.phones) {
         Bytes key;
         if (!g.pairs.Key(p.id, key)) continue;
         if (!pick || p.id == last) pick = &p;
+    }
+    // USB primeiro. Se ele acabou de falhar (cabo sem o app, outro aparelho no adb), o Wi-Fi
+    // assume e o USB só é tentado de novo bem depois, para não ficar preso tentando o cabo.
+    ULONGLONG usbWait = pick ? kUsbRetryAfterFailMs : 3000;
+    if (g.usbPresent && now - g.lastUsbFail > usbWait) {
+        Target t;
+        t.usb = true;
+        t.name = "celular (USB)";
+        t.automatic = true;
+        Start(t);
+        return;
     }
     if (!pick && g.phones.size() == 1 && !g.autoPairTried.count(g.phones[0].id)) {
         pick = &g.phones[0];
@@ -359,7 +445,16 @@ void AutoTick() {
 void StartUsbWatcher() {
     g.usbThread = std::thread([] {
         while (!g.quitting) {
-            if (!g.session->Active()) g.usbPresent = sys::AdbDevicePresent();
+            // Também durante a transmissão: é assim que o cabo ligado no meio dela é notado.
+            std::wstring name;
+            sys::UsbPhone state = sys::UsbPhoneState(name);
+            {
+                std::lock_guard<std::mutex> lock(g.usbNameLock);
+                g.usbName = name;
+            }
+            sys::UsbPhone before = g.usbState.exchange(state);
+            g.usbPresent = state == sys::UsbPhone::Ready;
+            if (state != before) PostMessageW(g.wnd, WM_APP_DEVICES, 0, 0);
             for (int i = 0; i < 30 && !g.quitting; i++) Sleep(100);
         }
     });
@@ -395,7 +490,7 @@ void UpdateTray() {
     nid.hWnd = g.wnd;
     nid.uID = 1;
     nid.uFlags = NIF_TIP;
-    std::wstring tip = L"GodoiCan — " + (s.title.empty() ? std::wstring(L"desconectado") : s.title);
+    std::wstring tip = L"GodoiCam — " + (s.title.empty() ? std::wstring(L"desconectado") : s.title);
     wcsncpy_s(nid.szTip, tip.c_str(), _TRUNCATE);
     Shell_NotifyIconW(NIM_MODIFY, &nid);
 }
@@ -407,7 +502,7 @@ void AddTray() {
     nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     nid.uCallbackMessage = WM_APP_TRAY;
     nid.hIcon = LoadIconW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDI_APP));
-    wcscpy_s(nid.szTip, L"GodoiCan");
+    wcscpy_s(nid.szTip, L"GodoiCam");
     g.trayAdded = Shell_NotifyIconW(NIM_ADD, &nid);
 }
 
@@ -435,7 +530,7 @@ void HideToTray() {
         nid.hWnd = g.wnd;
         nid.uID = 1;
         nid.uFlags = NIF_INFO;
-        wcscpy_s(nid.szInfoTitle, L"O GodoiCan continua ativo");
+        wcscpy_s(nid.szInfoTitle, L"O GodoiCam continua ativo");
         wcscpy_s(nid.szInfo, L"A câmera segue funcionando. Para sair, clique com o botão direito no ícone.");
         Shell_NotifyIconW(NIM_MODIFY, &nid);
     }
@@ -443,11 +538,113 @@ void HideToTray() {
 
 // ------------------------------------------------------------------------------------ menu ☰
 
+void AddControl(HMENU m, const std::wstring& text, uint8_t key, int32_t value, bool checked, bool enabled = true) {
+    if (IDM_CONTROL + (int)g.controlItems.size() > IDM_CONTROL_LAST) return;
+    AppendMenuW(m, MF_STRING | (checked ? MF_CHECKED : 0) | (enabled ? 0 : MF_GRAYED),
+                IDM_CONTROL + g.controlItems.size(), text.c_str());
+    g.controlItems.push_back({key, value});
+}
+
+std::wstring Fmt(const wchar_t* fmt, ...) {
+    wchar_t buf[128];
+    va_list args;
+    va_start(args, fmt);
+    vswprintf_s(buf, fmt, args);
+    va_end(args);
+    return buf;
+}
+
+// Submenu de controle remoto da câmera do celular (Fase 7). Vazio sem sessão.
+HMENU PhoneCameraMenu() {
+    Session::PhoneCamera c = g.session->GetPhoneCamera();
+    if (!c.valid) return nullptr;
+    HMENU m = CreatePopupMenu();
+    using namespace proto;
+
+    if (c.cameraCount > 1)
+        AddControl(m, L"Trocar câmera (agora: " + c.label + L")", CTL_SWITCH_CAMERA, 0, false);
+    AddControl(m, L"Lanterna", CTL_TORCH, c.torchOn ? 0 : 1, c.torchOn, c.torchAvailable);
+
+    HMENU zoom = CreatePopupMenu();
+    int lastZoom = -1;
+    for (int z : {c.zoomMin, 100, 200, 300, 500, 1000}) {
+        if (z < c.zoomMin || z > c.zoomMax || z == lastZoom) continue;
+        lastZoom = z;
+        std::wstring label = z % 100 ? Fmt(L"%d,%d×", z / 100, (z % 100) / 10) : Fmt(L"%d×", z / 100);
+        AddControl(zoom, label, CTL_ZOOM, z, abs(c.zoom - z) * 20 <= z);
+    }
+    AppendMenuW(m, MF_POPUP, (UINT_PTR)zoom, Fmt(L"Zoom (%d,%d×)", c.zoom / 100, (c.zoom % 100) / 10).c_str());
+
+    // A compensação só vale com a exposição automática.
+    bool exposureManual = c.iso != 0 || c.exposureUs != 0;
+    HMENU ev = CreatePopupMenu();
+    for (int half : {-4, -2, -1, 0, 1, 2, 4}) {  // meio EV por item
+        int steps = half * c.evPerStop / 2;
+        if (steps < c.evMin || steps > c.evMax || (half && !steps)) continue;
+        std::wstring label =
+            half == 0 ? L"Normal" : Fmt(L"%c%d,%d EV", half < 0 ? L'−' : L'+', abs(half) / 2, (abs(half) % 2) * 5);
+        AddControl(ev, label, CTL_EV, steps, c.ev == steps, !exposureManual);
+    }
+    AppendMenuW(m, MF_POPUP, (UINT_PTR)ev, exposureManual ? L"Exposição (manual pelo ISO/obturador)" : L"Exposição");
+    AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+
+    HMENU iso = CreatePopupMenu();
+    AddControl(iso, L"Automático", CTL_ISO, 0, c.iso == 0);
+    for (int v : {50, 100, 200, 400, 800, 1600, 3200, 6400})
+        if (v >= c.isoMin && v <= c.isoMax) AddControl(iso, Fmt(L"ISO %d", v), CTL_ISO, v, c.iso == v);
+    AppendMenuW(m, MF_POPUP | (c.manualExposure ? 0 : MF_GRAYED), (UINT_PTR)iso,
+                c.iso ? Fmt(L"ISO (%d)", c.iso).c_str() : L"ISO (automático)");
+
+    HMENU shutter = CreatePopupMenu();
+    AddControl(shutter, L"Automático", CTL_EXPOSURE_US, 0, c.exposureUs == 0);
+    for (int den : {2000, 1000, 500, 250, 120, 100, 60, 50, 30}) {
+        int us = 1000000 / den;
+        if (us >= c.exposureMinUs && us <= c.exposureMaxUs)
+            AddControl(shutter, Fmt(L"1/%d s", den), CTL_EXPOSURE_US, us, abs(c.exposureUs - us) * 20 <= us);
+    }
+    AppendMenuW(m, MF_POPUP | (c.manualExposure ? 0 : MF_GRAYED), (UINT_PTR)shutter,
+                c.exposureUs ? Fmt(L"Obturador (1/%d s)", (1000000 + c.exposureUs / 2) / c.exposureUs).c_str()
+                             : L"Obturador (automático)");
+
+    HMENU focus = CreatePopupMenu();
+    AddControl(focus, L"Automático", CTL_FOCUS, -1, c.focus < 0);
+    AddControl(focus, L"Infinito", CTL_FOCUS, 0, c.focus == 0);
+    if (c.focusCalibrated) {
+        struct { const wchar_t* name; int d; } stops[] = {
+            {L"2 m", 50}, {L"1 m", 100}, {L"50 cm", 200}, {L"30 cm", 333}, {L"15 cm", 667}, {L"10 cm", 1000}};
+        for (auto& s : stops)
+            if (s.d <= c.focusMax) AddControl(focus, s.name, CTL_FOCUS, s.d, c.focus == s.d);
+    } else {
+        for (int pct : {25, 50, 75, 100}) {
+            int d = c.focusMax * pct / 100;
+            AddControl(focus, Fmt(L"Mais perto %d%%", pct), CTL_FOCUS, d, c.focus == d);
+        }
+    }
+    AppendMenuW(m, MF_POPUP | (c.manualFocus ? 0 : MF_GRAYED), (UINT_PTR)focus,
+                c.focus < 0 ? L"Foco (automático)" : L"Foco (manual)");
+
+    HMENU kelvin = CreatePopupMenu();
+    AddControl(kelvin, L"Automático", CTL_KELVIN, 0, c.kelvin == 0);
+    for (int k : {2700, 3200, 4000, 5000, 5600, 6500, 7500})
+        AddControl(kelvin, Fmt(L"%d K", k), CTL_KELVIN, k, c.kelvin == k);
+    AppendMenuW(m, MF_POPUP | (c.kelvinAvailable ? 0 : MF_GRAYED), (UINT_PTR)kelvin,
+                c.kelvin ? Fmt(L"Temperatura de cor (%d K)", c.kelvin).c_str() : L"Temperatura de cor (automática)");
+
+    AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+    AddControl(m, L"Tudo automático", CTL_ALL_AUTO, 0, false);
+    return m;
+}
+
 void ShowMainMenu(POINT pt, bool tray) {
     HMENU m = CreatePopupMenu();
     bool active = g.session->Active();
+    g.controlItems.clear();
     if (tray) {
-        AppendMenuW(m, MF_STRING, IDM_OPEN, L"Abrir o GodoiCan");
+        AppendMenuW(m, MF_STRING, IDM_OPEN, L"Abrir o GodoiCam");
+        AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
+    }
+    if (HMENU cam = PhoneCameraMenu()) {
+        AppendMenuW(m, MF_POPUP, (UINT_PTR)cam, L"Câmera do celular");
         AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
     }
     AppendMenuW(m, MF_STRING, IDM_IP, L"Conectar pelo IP…");
@@ -462,6 +659,7 @@ void ShowMainMenu(POINT pt, bool tray) {
     AppendMenuW(m, MF_STRING, IDM_CAMERA, g.cameraReady ? L"Reinstalar câmera virtual" : L"Instalar câmera virtual");
     AppendMenuW(m, MF_STRING, IDM_FORGET, L"Esquecer celulares pareados");
     AppendMenuW(m, MF_STRING, IDM_FOLDER, L"Abrir pasta de diagnóstico");
+    AppendMenuW(m, MF_STRING, IDM_ABOUT, L"Sobre");
     AppendMenuW(m, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(m, MF_STRING, IDM_EXIT, L"Sair");
     SetForegroundWindow(g.wnd);
@@ -507,11 +705,11 @@ void OnMenu(int id) {
             break;
         case IDM_CAMERA:
             SetupCamera(true);
-            if (!g.cameraReady) MessageBoxW(g.wnd, g.cameraMessage.c_str(), L"GodoiCan", MB_ICONWARNING);
+            if (!g.cameraReady) MessageBoxW(g.wnd, g.cameraMessage.c_str(), L"GodoiCam", MB_ICONWARNING);
             break;
         case IDM_FORGET:
             if (MessageBoxW(g.wnd, L"Esquecer todos os celulares pareados? Será preciso digitar o código de novo.",
-                            L"GodoiCan", MB_YESNO | MB_ICONQUESTION) == IDYES) {
+                            L"GodoiCam", MB_YESNO | MB_ICONQUESTION) == IDYES) {
                 g.userStopped = true;
                 g.session->Disconnect();
                 g.pairs.Clear();
@@ -523,6 +721,14 @@ void OnMenu(int id) {
             ShellExecuteW(nullptr, L"open", dir.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
             break;
         }
+        case IDM_ABOUT:
+            MessageBoxW(g.wnd,
+                        L"GodoiCam 0.1.0\n"
+                        L"Celular Android como webcam do Windows 11.\n"
+                        L"Gratuito, sem anúncios e sem telemetria.\n"
+                        L"Licença MIT. O vídeo fica na sua rede; não vai para a nuvem.",
+                        L"Sobre o GodoiCam", MB_OK | MB_ICONINFORMATION);
+            break;
         case IDM_EXIT:
             DestroyWindow(g.wnd);
             return;
@@ -567,8 +773,16 @@ void Paint(HDC screen) {
     GetClientRect(g.wnd, &rc);
     int w = rc.right, h = rc.bottom;
     if (w <= 0 || h <= 0) return;
+    // O buffer de fundo é reaproveitado entre pinturas (a prévia repinta ~30 vezes por segundo).
+    static HBITMAP bmp = nullptr;
+    static int bmpW = 0, bmpH = 0;
+    if (!bmp || bmpW != w || bmpH != h) {
+        if (bmp) DeleteObject(bmp);
+        bmp = CreateCompatibleBitmap(screen, w, h);
+        bmpW = w;
+        bmpH = h;
+    }
     HDC dc = CreateCompatibleDC(screen);
-    HBITMAP bmp = CreateCompatibleBitmap(screen, w, h);
     HGDIOBJ oldBmp = SelectObject(dc, bmp);
     HGDIOBJ oldFont = SelectObject(dc, g.font);
     SetBkMode(dc, TRANSPARENT);
@@ -647,6 +861,15 @@ void Paint(HDC screen) {
             DrawLines(dc, s.stats, shadow, g.fontSmall, RGB(0, 0, 0), DT_LEFT | DT_BOTTOM);
             DrawLines(dc, s.stats, sr, g.fontSmall, kText, DT_LEFT | DT_BOTTOM);
         }
+        UsbAdvice advice;
+        if (GetTickCount64() < g.usbNoticeUntil && GetUsbAdvice(advice)) {
+            RECT nr = {v.left + S(12), v.top + S(10), v.right - S(12), v.top + S(40)};
+            HBRUSH bg = CreateSolidBrush(RGB(60, 45, 10));
+            FillRect(dc, &nr, bg);
+            DeleteObject(bg);
+            std::wstring text = L"Cabo USB: " + advice.title + L" — " + advice.shortText + L" (o Wi-Fi continua)";
+            DrawLines(dc, text, nr, g.fontSmall, kWait, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        }
     } else if (g.panel == Panel::None) {
         // Tela de espera, no estilo do Iriun: o que está acontecendo e o que fazer.
         std::wstring title, body;
@@ -660,7 +883,7 @@ void Paint(HDC screen) {
             title = s.title.empty() ? L"Conectando…" : s.title;
         } else if (g.phones.empty()) {
             title = L"Nenhum celular encontrado";
-            body = L"Abra o GodoiCan no celular.\n"
+            body = L"Abra o GodoiCam no celular.\n"
                    L"Celular e PC no mesmo Wi-Fi — ou o cabo USB com a depuração USB ligada.\n"
                    L"Celulares já pareados conectam sozinhos.";
         } else {
@@ -668,6 +891,15 @@ void Paint(HDC screen) {
             body = L"Escolha o celular na lista acima para conectar.";
         }
         if (!active && !s.detail.empty() && s.state == Session::State::Failed) body += L"\n\n" + s.detail;
+        UsbAdvice advice;
+        if (!active && GetUsbAdvice(advice)) {
+            if (g.phones.empty()) {
+                title = advice.title;
+                body = advice.body;
+            } else {
+                body += L"\n\nCabo USB: " + advice.title + L".\n" + advice.body;
+            }
+        }
         RECT tr = {v.left + S(24), v.top + vh / 2 - S(70), v.right - S(24), v.top + vh / 2 - S(30)};
         DrawLines(dc, title, tr, g.fontTitle, kText, DT_CENTER | DT_BOTTOM | DT_SINGLELINE | DT_END_ELLIPSIS);
         RECT br = {v.left + S(24), v.top + vh / 2 - S(18), v.right - S(24), v.bottom - S(40)};
@@ -681,7 +913,6 @@ void Paint(HDC screen) {
     BitBlt(screen, 0, 0, w, h, dc, 0, 0, SRCCOPY);
     SelectObject(dc, oldFont);
     SelectObject(dc, oldBmp);
-    DeleteObject(bmp);
     DeleteDC(dc);
 }
 
@@ -764,6 +995,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 PanelCancel();
             } else if (id >= IDM_IP && id <= IDM_EXIT) {
                 OnMenu(id);
+            } else if (id >= IDM_CONTROL && id < IDM_CONTROL + (int)g.controlItems.size()) {
+                auto [key, value] = g.controlItems[id - IDM_CONTROL];
+                g.session->SendControl(key, value);
             }
             return 0;
         }
@@ -773,11 +1007,19 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_APP_PREVIEW:
             if (g.session->TakePreview(g.preview, g.previewW, g.previewH)) InvalidateRect(hwnd, &g.videoRect, FALSE);
             return 0;
-        case WM_APP_DEVICES:
+        case WM_APP_DEVICES: {
+            sys::UsbPhone usb = g.usbState.load();
+            if (usb != g.usbStateSeen) {
+                g.usbStateSeen = usb;
+                UsbAdvice advice;
+                g.usbNoticeUntil = GetUsbAdvice(advice) ? GetTickCount64() + 15000 : 0;
+                if (g.usbNoticeUntil) Log("cabo USB: %s", Narrow(advice.title).c_str());
+            }
             RefreshChoices();
             AutoTick();
             InvalidateRect(hwnd, nullptr, FALSE);
             return 0;
+        }
         case WM_APP_TRAY:
             if (LOWORD(lp) == WM_LBUTTONUP || LOWORD(lp) == WM_LBUTTONDBLCLK) {
                 ShowFromTray();
@@ -848,9 +1090,9 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
     }
     LocalFree(argv);
 
-    HANDLE single = CreateMutexW(nullptr, TRUE, L"Local\\GodoiCanApp");
+    HANDLE single = CreateMutexW(nullptr, TRUE, L"Local\\GodoiCamApp");
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
-        if (HWND other = FindWindowW(L"GodoiCanWindow", nullptr)) {
+        if (HWND other = FindWindowW(L"GodoiCamWindow", nullptr)) {
             ShowWindow(other, SW_SHOW);
             ShowWindow(other, SW_RESTORE);
             SetForegroundWindow(other);
@@ -872,11 +1114,11 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int show) {
     wc.hIcon = LoadIconW(inst, MAKEINTRESOURCEW(IDI_APP));
     wc.hIconSm = wc.hIcon;
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    wc.lpszClassName = L"GodoiCanWindow";
+    wc.lpszClassName = L"GodoiCamWindow";
     RegisterClassExW(&wc);
 
     UINT dpi = GetDpiForSystem();
-    HWND hwnd = CreateWindowExW(0, wc.lpszClassName, L"GodoiCan", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
+    HWND hwnd = CreateWindowExW(0, wc.lpszClassName, L"GodoiCam", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
                                 CW_USEDEFAULT, CW_USEDEFAULT, MulDiv(980, dpi, 96), MulDiv(620, dpi, 96), nullptr,
                                 nullptr, inst, nullptr);
     if (!minimized) ShowWindow(hwnd, show);

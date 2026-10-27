@@ -1,4 +1,4 @@
-package com.godoi.godoican.net
+package com.godoi.godoicam.net
 
 import android.os.SystemClock
 import java.io.IOException
@@ -31,14 +31,14 @@ class StreamServer(
         ss.reuseAddress = true
         ss.bind(InetSocketAddress(Proto.TCP_PORT))
         serverSocket = ss
-        thread(name = "GodoiCan-accept", isDaemon = true) {
+        thread(name = "GodoiCam-accept", isDaemon = true) {
             while (!ss.isClosed) {
                 val s = try {
                     ss.accept()
                 } catch (_: IOException) {
                     break
                 }
-                thread(name = "GodoiCan-client", isDaemon = true) { handle(s) }
+                thread(name = "GodoiCam-client", isDaemon = true) { handle(s) }
             }
         }
     }
@@ -64,7 +64,7 @@ class StreamServer(
             val r = Reader(hello.data)
             if (!r.bytes(4).contentEquals(Proto.MAGIC)) return
             if (r.u16() != Proto.VERSION) {
-                io.sendError(Proto.ERR_VERSION, "Versão incompatível. Atualize o GodoiCan.")
+                io.sendError(Proto.ERR_VERSION, "Versão incompatível. Atualize o GodoiCam.")
                 return
             }
             val pcId = r.bytes(16)
@@ -72,6 +72,11 @@ class StreamServer(
             val pcNonce = r.bytes(16)
             val pcPub = r.bytes(65)
             val pcName = r.str().ifBlank { "PC" }
+            val caps = if (r.remaining() >= 4) r.u32() else 0
+            val frameAcks = caps and Proto.CAP_FRAME_ACK != 0
+            // Com confirmação de quadros o atraso é medido de ponta a ponta, então o buffer do
+            // sistema pode ser grande (vazão no Wi-Fi); sem ela, fica pequeno para não esconder atraso.
+            sock.sendBufferSize = if (frameAcks) ClientSession.SOCKET_SEND_BUFFER_ACKED else ClientSession.SOCKET_SEND_BUFFER
 
             val cur = current
             if (cur != null && !cur.closed) {
@@ -97,7 +102,7 @@ class StreamServer(
             io.recvCipher = Aead(Crypto.hmac(key, Crypto.label("GDCN-key-c2p"), pcNonce, phoneNonce))
             sock.soTimeout = 10_000
 
-            val s = ClientSession(sock, io, pcId, pcName)
+            val s = ClientSession(sock, io, pcId, pcName, frameAcks)
             session = s
             current = s
             callbacks.onSessionStarted(s)

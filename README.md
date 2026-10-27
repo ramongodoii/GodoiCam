@@ -1,107 +1,122 @@
-# GodoiCan
+# GodoiCam
 
-Use o celular Android como webcam do PC com Windows 11, por Wi‑Fi ou cabo USB.
-Uso pessoal e gratuito: sem anúncios, sem marca d'água, sem telemetria.
+Use um celular **Android** como webcam de um PC com **Windows 11**. Gratuito, sem anúncios, sem marca d'água e sem telemetria. O código é aberto ([MIT](LICENSE)).
+
+O vídeo vai do celular ao PC **só na sua rede** (Wi‑Fi ou cabo USB), cifrado. Não existe servidor nosso no meio.
 
 ```
-celular: Camera2 → GPU (gira/espelha/enquadra) → encoder H.264 de hardware
-        → TCP cifrado (AES‑256‑GCM) por Wi‑Fi ou USB
-PC:     decodificador H.264 do Windows → memória compartilhada
-        → câmera virtual "GodoiCan" (Media Foundation) → Zoom, Teams, Meet, OBS, Discord…
+celular  →  H.264  →  Wi‑Fi ou USB (AES‑256‑GCM)  →  PC  →  câmera virtual "GodoiCam"
+                                                              Zoom, Teams, Meet, OBS, Discord…
 ```
 
-## Estrutura
+**Versão atual: 0.1.0** (ainda não há Release pública com instaladores; veja [Instalar](#instalar) para compilação). O que falta para postar no GitHub está em [`docs/LANCAMENTO.md`](docs/LANCAMENTO.md).
 
-| Pasta | Conteúdo |
+## O que precisa
+
+| | |
 |---|---|
-| `android/` | App Android (Kotlin, minSdk 26) |
-| `windows/vcam/` | Câmera virtual: DLL carregada pelo Frame Server do Windows |
-| `windows/app/` | GodoiCan.exe: descoberta, pareamento, recepção, decodificação, prévia |
-| `windows/common/` | Contrato da memória compartilhada e conversões de imagem |
-| `windows/test/` | `decodetest`: reproduz um fluxo gravado no decodificador |
-| `docs/PROTOCOLO.md` | Protocolo de rede e criptografia |
+| Celular | Android 8 ou mais novo, com câmera |
+| PC | **Windows 11** (a câmera virtual usa uma API que o Windows 10 não tem) |
+| Rede | Mesmo Wi‑Fi **ou** cabo USB com Depuração USB ligada |
+
+**Nesta versão não há áudio.** Só a imagem. O microfone do PC continua sendo o do PC.
+
+## Instalar
+
+### Celular
+
+1. Instale o `GodoiCam.apk` (quem compilou: `android/app/build/outputs/apk/release/app-release.apk`).
+2. Abra o GodoiCam e aceite a permissão de **câmera**.
+
+O Android pode avisar que o app não veio da Play Store. Isso é esperado enquanto a distribuição for por APK.
+
+### PC
+
+1. Compile o Windows (`windows\build.cmd`) **ou** use os arquivos de uma Release, quando existir.
+2. Dê dois cliques em `windows\instalar.cmd` e aceite o pedido de administrador (só nesta vez).
+3. Se o SmartScreen bloquear, use **Mais informações → Executar assim mesmo**.
+
+O instalador copia o app para `C:\Program Files\GodoiCam`, registra a câmera virtual, libera o firewall e cria o atalho no menu Iniciar. Nas próximas vezes, abra **GodoiCam** pelo menu Iniciar.
+
+Para remover: `windows\desinstalar.cmd`.
+
+**USB:** o PC precisa do `adb`. Se você tem o Android Studio, ele já encontra o SDK. Senão, baixe as [platform-tools](https://developer.android.com/tools/releases/platform-tools) e coloque a pasta como `adb` ao lado do `GodoiCam.exe` (fica `adb\adb.exe`). Não redistribuímos o `adb` da Google neste repositório.
+
+## Usar
+
+O passo a passo com imagens mentais da tela atual está em [`TUTORIAL.md`](TUTORIAL.md). Resumo:
+
+1. Abra o GodoiCam no **celular** e no **PC** (mesma rede, ou o cabo).
+2. Na **primeira vez**, o PC pede o código de 6 dígitos que aparece no celular. Digite e confirme.
+3. Depois disso, basta abrir os dois: o PC conecta sozinho. USB tem preferência se o cabo estiver pronto.
+4. No Zoom, Teams, Meet, OBS etc., escolha a câmera **GodoiCam**.
+
+No celular: toque para focar, dois dedos para zoom, folha de **Ajustes** (resolução, qualidade, Modo Pro). **Tela preta** apaga a prévia e economiza bateria; a câmera continua. Para parar de verdade, **Desligar** ou a notificação.
+
+No PC: o seletor no topo lista o celular (`[Wi‑Fi]` / cabo USB). O menu **☰** tem IP, USB, câmera do celular, iniciar com o Windows, reinstalar a câmera.
+
+Atalhos: `GodoiCam.exe --usb` ou `GodoiCam.exe --ip 192.168.0.15`.
+
+## Qualidade (taxa de bits)
+
+| Qualidade | 1080p30 | 4K30 |
+|---|---|---|
+| Econômica | ~5 Mbps | ~20 Mbps |
+| Normal | ~9 Mbps | ~35 Mbps |
+| Alta (padrão) | ~15 Mbps | ~60 Mbps |
+| Máxima | ~22 Mbps | ~80 Mbps |
+
+Em Wi‑Fi 5 GHz ou USB, deixe **Alta**. Em Wi‑Fi 2,4 GHz congestionado, **Normal**. Se a rede não acompanhar, o celular baixa o bitrate sozinho para não atrasar.
+
+Atraso típico no S24, 1080p30, Wi‑Fi 5 GHz: cerca de **100–160 ms** da captura até o PC.
+
+## Privacidade
+
+- A câmera só é usada neste aparelho, enquanto o app está ligado.
+- O vídeo vai **somente** ao PC que você pareou, na rede local ou no cabo. Não sobe para a nuvem.
+- Não há conta, anúncio, analytics nem chamada de internet nossa.
+- O pareamento usa código de 6 dígitos + ECDH P‑256; a sessão inteira vai em AES‑256‑GCM. Detalhes: [`docs/PROTOCOLO.md`](docs/PROTOCOLO.md).
+- Chaves no celular: armazenamento privado do app. No PC: `%APPDATA%\GodoiCam\pairs.dat` (DPAPI).
+- O log `%APPDATA%\GodoiCam\log.txt` não guarda imagem nem chaves.
+
+## Limites
+
+- Só **vídeo** (sem microfone do celular).
+- Só **Windows 11** no PC.
+- USB pela **Depuração USB** (`adb`). Sem ela, use Wi‑Fi ou Ancoragem USB + IP.
+- Primeira instalação no PC pede administrador.
 
 ## Compilar
 
-**Android** (precisa do Android SDK e do JDK do Android Studio):
+**Android** (Android Studio / JDK 17 + SDK):
 
 ```bash
-cd android && ./gradlew assembleRelease
+cd android
+./gradlew assembleRelease
 ```
 
-O APK sai em `android/app/build/outputs/apk/release/app-release.apk` (assinado com a chave de debug local; serve para instalar no seu próprio celular).
+O APK sai em `android/app/build/outputs/apk/release/app-release.apk`.
 
-**Windows** (precisa do Visual Studio 2022 com C++):
+Para um APK de distribuição (sempre o mesmo “app” no celular), crie `android/keystore.properties` a partir de `android/keystore.properties.example` e um `.jks`. Sem esse arquivo, o release é assinado com a chave de **debug** local — serve só na sua máquina.
+
+**Windows** (Visual Studio 2022 com C++):
 
 ```bash
 windows\build.cmd
 ```
 
-Gera `windows\bin\GodoiCan.exe` e `windows\bin\GodoiCanVCam.dll`.
+Gera `windows\bin\GodoiCam.exe` e `windows\bin\GodoiCamVCam.dll`. Depois rode `windows\instalar.cmd`.
 
-## Instalar
+## Estrutura do repositório
 
-1. Celular: instale o APK (copie para o celular ou `adb install app-release.apk`) e abra o GodoiCan. Aceite a permissão de câmera.
-2. PC: rode `windows\instalar.cmd` e aceite o pedido de administrador. Ele copia o app para `C:\Program Files\GodoiCan`, registra a câmera virtual, libera o app no firewall e cria o atalho no menu Iniciar.
-3. Ao abrir o GodoiCan no PC pela primeira vez, a câmera virtual "GodoiCan" é criada. Ela continua disponível mesmo com o app fechado (mostra uma tela de espera).
+| Pasta | Conteúdo |
+|---|---|
+| `android/` | App Android (Kotlin, minSdk 26) |
+| `windows/vcam/` | Câmera virtual (DLL do Frame Server) |
+| `windows/app/` | GodoiCam.exe |
+| `windows/common/` | Memória compartilhada entre exe e DLL |
+| `docs/` | Protocolo, medições, roteiro, [lançamento](docs/LANCAMENTO.md) |
 
-Para remover tudo: `windows\desinstalar.cmd`.
+## Licença
 
-## Usar
-
-**Wi‑Fi** (PC e celular na mesma rede):
-
-1. Abra o GodoiCan no celular. Ele mostra o IP no topo da tela.
-2. No PC, o celular aparece em "Celulares na rede". Clique em **Conectar (Wi‑Fi)**. Se a lista ficar vazia (redes que bloqueiam broadcast), digite o IP e clique em **Conectar IP**.
-3. Na primeira vez, o celular mostra um código de 6 dígitos. Digite no PC e clique em **Parear**. Depois disso, o PC reconecta sozinho.
-
-**USB** (mais estável, menos atraso):
-
-1. No celular, ative **Opções do desenvolvedor → Depuração USB** e conecte o cabo.
-2. Autorize o PC no aviso que aparece no celular.
-3. No PC, clique em **Conectar por USB**. O app usa o `adb` do Android SDK (ou coloque a pasta `platform-tools` como `adb\` ao lado do GodoiCan.exe).
-
-Atalhos de linha de comando: `GodoiCan.exe --usb` ou `GodoiCan.exe --ip 192.168.0.15`.
-
-Depois, no Zoom, Teams, Meet, OBS etc., escolha a câmera **GodoiCan**.
-
-### No celular
-
-- Toque na imagem para focar e medir a luz naquele ponto; toque duas vezes para voltar ao automático.
-- Pinça com dois dedos para zoom (inclui a ultra‑angular em 0,5× nos aparelhos que a expõem assim).
-- **Ajustes**: câmera, resolução (720p até 4K, conforme o aparelho), 24/30/60 fps, qualidade, espelhar, preencher o quadro, rotação, exposição, balanço de branco, travar exposição, estabilização e modo de pouca luz.
-- **Tela preta**: apaga a prévia e baixa o brilho para economizar bateria. Toque duas vezes para voltar.
-- O serviço continua com a tela desligada. Use **Desligar** (ou a notificação) para parar.
-
-## Qualidade e atraso
-
-| Qualidade | 1080p30 | 4K30 |
-|---|---|---|
-| Econômica | ~4 Mbps | ~15 Mbps |
-| Normal | ~6 Mbps | ~25 Mbps |
-| Alta (padrão) | ~10 Mbps | ~40 Mbps |
-| Máxima | ~16 Mbps | ~62 Mbps |
-
-- Sem B‑frames, prioridade de tempo real, decodificador do Windows em modo de baixa latência (cada quadro sai assim que chega).
-- Se a rede não acompanha, o celular descarta quadros velhos, pede um quadro‑chave e baixa o bitrate; depois recupera aos poucos. A imagem fica atual em vez de atrasar.
-- O PC mostra o atraso estimado da captura até a decodificação e o tempo de rede. Em Wi‑Fi de 5 GHz ou USB, prefira "Alta"; em Wi‑Fi de 2,4 GHz congestionado, "Normal".
-
-## Segurança
-
-- Pareamento com código de 6 dígitos mostrado só na tela do celular, sobre uma troca de chaves ECDH P‑256. Quem só escuta a rede não descobre a chave; um código errado encerra a tentativa e o celular gera outro.
-- Toda a sessão (controle e vídeo) é cifrada e autenticada com AES‑256‑GCM, com chaves novas a cada conexão.
-- As chaves ficam no armazenamento privado do app no celular e, no PC, em `%APPDATA%\GodoiCan\pairs.dat` protegido pelo DPAPI do Windows.
-- Detalhes em `docs/PROTOCOLO.md`.
-
-## Problemas comuns
-
-- **O celular não aparece na lista**: alguns roteadores isolam os aparelhos ou bloqueiam broadcast. Use o IP mostrado no celular. Confira se a rede do Windows não está como "Pública" com o firewall bloqueando.
-- **A câmera GodoiCan não aparece no app de vídeo**: rode `instalar.cmd` de novo, clique em **Reinstalar câmera** no GodoiCan e reinicie o app de vídeo.
-- **Imagem de cabeça para baixo ou de lado**: em Ajustes, use **Correção de rotação** ou desligue **Girar com o celular**.
-- **Diagnóstico**: o PC grava `%APPDATA%\GodoiCan\log.txt` (sem imagens nem chaves). Com a variável `GODOICAN_DUMP=arquivo`, grava o vídeo recebido para testar com `windows\bin\decodetest.exe arquivo largura altura`.
-
-## Limites desta versão
-
-- Só vídeo (o áudio do microfone fica para uma próxima etapa).
-- Só Windows 11 no PC (a câmera virtual usa a API do Windows 11).
-- USB via `adb` (exige depuração USB). Alternativa sem adb: ative o **Ancoragem USB** no celular e conecte pelo IP.
+[MIT](LICENSE). Copyright (c) 2026 Ramon Godoi.

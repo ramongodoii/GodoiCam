@@ -91,6 +91,60 @@
             android:layout_marginTop="12dp"
             android:text="@string/auto_focus" />
 
+        <TextView style="@style/Section" android:text="@string/section_pro" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/swIso"
+            style="@style/Toggle"
+            android:text="@string/iso_manual" />
+        <TextView android:id="@+id/lblIso" style="@style/Label" />
+        <SeekBar
+            android:id="@+id/sbIso"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/swShutter"
+            style="@style/Toggle"
+            android:text="@string/shutter_manual" />
+        <TextView android:id="@+id/lblShutter" style="@style/Label" />
+        <SeekBar
+            android:id="@+id/sbShutter"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/swFocus"
+            style="@style/Toggle"
+            android:text="@string/focus_manual" />
+        <TextView android:id="@+id/lblFocus" style="@style/Label" />
+        <SeekBar
+            android:id="@+id/sbFocus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/swKelvin"
+            style="@style/Toggle"
+            android:text="@string/kelvin_manual" />
+        <TextView android:id="@+id/lblKelvin" style="@style/Label" />
+        <SeekBar
+            android:id="@+id/sbKelvin"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnAllAuto"
+            style="@style/Widget.Material3.Button.TonalButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/all_auto" />
+
         <TextView style="@style/Section" android:text="@string/section_pcs" />
 
         <TextView
@@ -130,9 +184,17 @@
             xmlns:app="http://schemas.android.com/apk/res-auto" />
 
         <TextView
+            android:id="@+id/lblAbout"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
+            android:textColor="@color/text_secondary"
+            android:textSize="13sp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
             android:text="@string/tips"
             android:textColor="@color/text_secondary"
             android:textSize="13sp" />

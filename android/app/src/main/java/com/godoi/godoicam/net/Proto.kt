@@ -1,4 +1,4 @@
-package com.godoi.godoican.net
+package com.godoi.godoicam.net
 
 /** Constantes do protocolo. A especificação completa está em docs/PROTOCOLO.md. */
 object Proto {
@@ -28,6 +28,26 @@ object Proto {
     const val BYE = 0x15
     const val REPORT = 0x16
     const val STATS = 0x17
+    const val FRAME_ACK = 0x18
+    const val CONTROL = 0x19
+    const val CAMERA_STATE = 0x1A
+
+    // Chaves do CONTROL (PC → celular): u8 chave, u32 valor com sinal.
+    const val CTL_SWITCH_CAMERA = 1
+    const val CTL_TORCH = 2
+    /** Zoom × 100. */
+    const val CTL_ZOOM = 3
+    /** Compensação de exposição em passos da câmera. */
+    const val CTL_EV = 4
+    /** 0 = automático. */
+    const val CTL_ISO = 5
+    /** Tempo de exposição em µs; 0 = automático. */
+    const val CTL_EXPOSURE_US = 6
+    /** Dioptrias × 100; negativo = automático. */
+    const val CTL_FOCUS = 7
+    /** 0 = automático. */
+    const val CTL_KELVIN = 8
+    const val CTL_ALL_AUTO = 9
 
     const val ERR_NOT_PAIRED = 1
     const val ERR_BAD_CODE = 2
@@ -37,6 +57,9 @@ object Proto {
     const val ERR_TIMEOUT = 6
 
     const val HELLO_FORCE_PAIR = 1
+
+    /** Capacidades do PC (u32 no HELLO). */
+    const val CAP_FRAME_ACK = 1
 
     const val VIDEO_KEY = 1
     const val VIDEO_CONFIG = 2

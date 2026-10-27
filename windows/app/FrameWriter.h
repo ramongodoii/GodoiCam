@@ -5,7 +5,7 @@
 
 #include <mutex>
 
-#include "GodoiCanShared.h"
+#include "GodoiCamShared.h"
 
 class FrameWriter {
 public:

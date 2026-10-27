@@ -1,4 +1,4 @@
-// Procura celulares com o GodoiCan aberto na rede local (broadcast UDP).
+// Procura celulares com o GodoiCam aberto na rede local (broadcast UDP).
 #pragma once
 
 #include <winsock2.h>

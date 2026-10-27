@@ -1,4 +1,4 @@
-package com.godoi.godoican.media
+package com.godoi.godoicam.media
 
 import android.graphics.SurfaceTexture
 import android.hardware.camera2.CameraCharacteristics
@@ -69,16 +69,44 @@ object CameraCaps {
 
     private fun is16by9(s: Size) = abs(s.width.toFloat() / s.height - 16f / 9f) < 0.02f
 
-    /** Menor saída 16:9 da câmera que cobre a resolução pedida no FPS pedido. */
-    fun cameraSize(c: CameraCharacteristics, width: Int, height: Int, fps: Int): Size {
+    /**
+     * Menor saída 16:9 da câmera que cobre a resolução pedida no FPS pedido.
+     *
+     * Com [coverPortrait], sobe um degrau (1440p para 1080p) para o recorte em pé não
+     * ampliar 1,78×. Não sobe até 4K: no S24 isso dobrou a codificação (73→150 ms) e,
+     * somado a filtro na GPU, derrubou o FPS enviado.
+     */
+    fun cameraSize(c: CameraCharacteristics, width: Int, height: Int, fps: Int, coverPortrait: Boolean = false): Size {
         val map = c.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)!!
         val all = map.getOutputSizes(SurfaceTexture::class.java)?.toList() ?: emptyList()
         val frameNs = 1_000_000_000L / fps
         val usable = all.filter { is16by9(it) && map.getOutputMinFrameDuration(SurfaceTexture::class.java, it) <= frameNs }
             .ifEmpty { all.filter { is16by9(it) } }
             .ifEmpty { all }
-        return usable.filter { it.width >= width && it.height >= height }.minByOrNull { it.width * it.height }
-            ?: usable.maxBy { it.width * it.height }
+        val covering = usable.filter { it.width >= width && it.height >= height }
+            .map { it.width to it.height }
+        val picked = pickCameraSize(covering, width, height, coverPortrait)
+            ?: (usable.maxBy { it.width * it.height }.let { it.width to it.height })
+        return Size(picked.first, picked.second)
+    }
+
+    /**
+     * Escolhe (largura, altura) dentro de [covering] (já filtradas: cobrem a saída).
+     * No máximo ~2,25× pixels da saída — 1440p para 1080p, 1080p para 720p; 4K fica de fora.
+     */
+    fun pickCameraSize(
+        covering: List<Pair<Int, Int>>,
+        width: Int,
+        height: Int,
+        coverPortrait: Boolean,
+    ): Pair<Int, Int>? {
+        if (covering.isEmpty()) return null
+        val budget = width.toLong() * height * 9 / 4
+        val within = covering.filter { it.first.toLong() * it.second <= budget }.ifEmpty { covering }
+        if (!coverPortrait) return within.minBy { it.first.toLong() * it.second }
+        val needH = minOf(width, height * 4 / 3)
+        return within.filter { it.second >= needH }.minByOrNull { it.first.toLong() * it.second }
+            ?: within.minBy { it.first.toLong() * it.second }
     }
 
     /** Encoder H.264 preferido (consultado uma vez: montar a MediaCodecList é lento). */
@@ -122,6 +150,34 @@ object CameraCaps {
             } ?: (r.height <= 1080)
             camOk && encOk
         }.ifEmpty { listOf(CANDIDATES.first()) }
+    }
+
+    /**
+     * Controles manuais (modo Pro) desta câmera; null = indisponível.
+     * [focusDiopters]: foco mais próximo em dioptrias (1/m), 0 = foco fixo.
+     */
+    data class Manual(
+        val iso: Range<Int>?,
+        val exposureNs: Range<Long>?,
+        val focusDiopters: Float,
+        val focusCalibrated: Boolean,
+        val kelvin: Boolean,
+    )
+
+    fun manual(c: CameraCharacteristics): Manual {
+        val caps = c.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES) ?: intArrayOf()
+        val sensor = CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR in caps
+        val afModes = c.get(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES) ?: intArrayOf()
+        val minFocus = c.get(CameraCharacteristics.LENS_INFO_MINIMUM_FOCUS_DISTANCE) ?: 0f
+        val calibration = c.get(CameraCharacteristics.LENS_INFO_FOCUS_DISTANCE_CALIBRATION)
+        return Manual(
+            iso = if (sensor) c.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE) else null,
+            exposureNs = if (sensor) c.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE) else null,
+            focusDiopters = if (sensor && CameraCharacteristics.CONTROL_AF_MODE_OFF in afModes) minFocus else 0f,
+            focusCalibrated = calibration != null &&
+                calibration != CameraCharacteristics.LENS_INFO_FOCUS_DISTANCE_CALIBRATION_UNCALIBRATED,
+            kelvin = WhiteBalance.supported(c),
+        )
     }
 
     fun zoomRange(c: CameraCharacteristics): Range<Float> {

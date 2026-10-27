@@ -1,4 +1,4 @@
-"""Gera windows/app/godoican.ico (lente laranja sobre fundo escuro) sem dependências."""
+"""Gera windows/app/godoicam.ico (lente laranja sobre fundo escuro) sem dependências."""
 import struct
 import sys
 import zlib

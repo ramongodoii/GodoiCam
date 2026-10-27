@@ -1,4 +1,4 @@
-package com.godoi.godoican
+package com.godoi.godoicam
 
 import android.Manifest
 import android.content.Intent
@@ -32,8 +32,8 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.isVisible
-import com.godoi.godoican.media.CameraCaps
-import com.godoi.godoican.media.DeviceReport
+import com.godoi.godoicam.media.CameraCaps
+import com.godoi.godoicam.media.DeviceReport
 import com.google.android.material.bottomsheet.BottomSheetBehavior
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.button.MaterialButton
@@ -62,6 +62,7 @@ class MainActivity : AppCompatActivity() {
 
     private var sheet: BottomSheetDialog? = null
     private var sheetView: View? = null
+    private var proPanel: ProPanel? = null
     private var zoomShortcuts = listOf<Float>()
 
     private val statusObserver: (Hub.Status) -> Unit = { render(it) }
@@ -69,7 +70,7 @@ class MainActivity : AppCompatActivity() {
 
     private val permissionRequest = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         if (hasCamera()) StreamService.start(this)
-        else showToast("Sem permissão de câmera o GodoiCan não funciona.")
+        else showToast("Sem permissão de câmera o GodoiCam não funciona.")
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -179,7 +180,9 @@ class MainActivity : AppCompatActivity() {
         statusDetail.text = listOfNotNull(
             s.addresses.takeIf { it.isNotBlank() && s.running }?.let { "IP do celular: $it" },
             s.video.takeIf { it.isNotBlank() && s.running },
+            s.cameraSize.takeIf { it.isNotBlank() && s.running }?.let { "Câmera captando em $it" },
             s.stats.takeIf { it.isNotBlank() },
+            s.lastSwitchMs?.let { "Última troca de câmera/resolução: $it ms" },
             s.message,
         ).joinToString("\n")
         // Mensagens de erro aparecem sozinhas; o resto só quando o usuário toca no selo.
@@ -188,7 +191,7 @@ class MainActivity : AppCompatActivity() {
         pairCard.isVisible = s.pairingCode != null
         s.pairingCode?.let { code ->
             pairCode.text = "${code.take(3)} ${code.drop(3)}"
-            pairHint.text = "Digite este código no GodoiCan do PC \"${s.pairingPc}\"."
+            pairHint.text = "Digite este código no GodoiCam do PC \"${s.pairingPc}\"."
             if (curtain.isVisible) setCurtain(false)
         }
 
@@ -197,6 +200,7 @@ class MainActivity : AppCompatActivity() {
         btnTorch.alpha = if (btnTorch.isEnabled) 1f else 0.35f
         btnTorch.isActivated = svc?.controls()?.torch == true
         refreshZoomRow()
+        proPanel?.refresh()
         (sheetView?.findViewById<MaterialButton>(R.id.btnPower))?.text =
             getString(if (s.running) R.string.power_off else R.string.power_on)
     }
@@ -279,7 +283,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onDoubleTap(e: MotionEvent): Boolean {
-                StreamService.instance?.updateControls { it.copy(focusPoint = null) }
+                StreamService.instance?.updateControls { it.copy(focusPoint = null, focusDiopters = null) }
                 showToast("Foco automático")
                 return true
             }
@@ -344,7 +348,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun openSettings() {
         if (StreamService.instance?.characteristics == null) {
-            showToast("Ligue o GodoiCan primeiro")
+            showToast("Ligue o GodoiCam primeiro")
             if (!Hub.status.running) ensurePermissionsAndStart()
             return
         }
@@ -357,12 +361,14 @@ class MainActivity : AppCompatActivity() {
             if (sheet === dialog) {
                 sheet = null
                 sheetView = null
+                proPanel = null
             }
         }
         sheet = dialog
         sheetView = view
         populateSettings(view)
         setupSettings(view)
+        proPanel = ProPanel(view).also { it.bind() }
         dialog.show()
     }
 
@@ -385,9 +391,7 @@ class MainActivity : AppCompatActivity() {
         root.v<Spinner>(R.id.spCamera).onPick { i ->
             val id = cameraIds.getOrNull(i) ?: return@onPick
             if (id != settings.cameraId) {
-                settings.cameraId = id
-                settings.zoom = 1f
-                StreamService.instance?.restartPipeline()
+                StreamService.instance?.selectCamera(id)
                 root.postDelayed({ populateSettings(root) }, 800)
             }
         }
@@ -448,7 +452,7 @@ class MainActivity : AppCompatActivity() {
         }
         toggle(R.id.swLowLight) {
             settings.lowLight = it
-            StreamService.instance?.restartPipeline()
+            StreamService.instance?.reopenCamera() // só muda a faixa de FPS da câmera
         }
 
         root.v<SeekBar>(R.id.sbExposure).setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -465,7 +469,7 @@ class MainActivity : AppCompatActivity() {
         })
 
         root.v<MaterialButton>(R.id.btnAutoFocus).setOnClickListener {
-            StreamService.instance?.updateControls { it.copy(focusPoint = null) }
+            StreamService.instance?.updateControls { it.copy(focusPoint = null, focusDiopters = null) }
             showToast("Foco automático")
         }
         root.v<MaterialButton>(R.id.btnReport).setOnClickListener {
@@ -474,7 +478,7 @@ class MainActivity : AppCompatActivity() {
                 val text = DeviceReport.build(this)
                 runOnUiThread {
                     val send = Intent(Intent.ACTION_SEND).setType("text/plain")
-                        .putExtra(Intent.EXTRA_SUBJECT, "GodoiCan — relatório do aparelho")
+                        .putExtra(Intent.EXTRA_SUBJECT, "GodoiCam — relatório do aparelho")
                         .putExtra(Intent.EXTRA_TEXT, text)
                     startActivity(Intent.createChooser(send, getString(R.string.share_report)))
                 }
@@ -556,5 +560,6 @@ class MainActivity : AppCompatActivity() {
             if (names.isEmpty()) "Nenhum PC pareado ainda." else names.joinToString("\n") { "• $it" }
         root.v<MaterialButton>(R.id.btnPower).text =
             getString(if (Hub.status.running) R.string.power_off else R.string.power_on)
+        root.v<TextView>(R.id.lblAbout).text = getString(R.string.about_fmt, BuildConfig.VERSION_NAME)
     }
 }

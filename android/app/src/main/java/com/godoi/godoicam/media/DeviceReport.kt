@@ -1,4 +1,4 @@
-package com.godoi.godoican.media
+package com.godoi.godoicam.media
 
 import android.content.Context
 import android.graphics.SurfaceTexture
@@ -13,7 +13,7 @@ import kotlin.math.abs
 /** Relatório em texto do que câmera e encoders deste aparelho suportam (Fase 0: diagnóstico). */
 object DeviceReport {
     fun build(context: Context): String = buildString {
-        appendLine("GodoiCan — relatório do aparelho")
+        appendLine("GodoiCam — relatório do aparelho")
         appendLine("Aparelho: ${Build.MANUFACTURER} ${Build.MODEL} (${Build.DEVICE}), Android ${Build.VERSION.RELEASE} / API ${Build.VERSION.SDK_INT}")
         if (Build.VERSION.SDK_INT >= 31) appendLine("SoC: ${Build.SOC_MANUFACTURER} ${Build.SOC_MODEL}")
         appendLine()
@@ -51,8 +51,20 @@ object DeviceReport {
             out.appendLine("  Faixas de FPS: ${c.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)?.joinToString()}")
             out.appendLine("  Relógio: ${if (c.get(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE) == CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME) "REALTIME" else "UNKNOWN"}")
             out.appendLine("  Estabilização digital: ${c.get(CameraCharacteristics.CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES)?.joinToString()} • óptica: ${c.get(CameraCharacteristics.LENS_INFO_AVAILABLE_OPTICAL_STABILIZATION)?.joinToString()}")
+            out.appendLine(
+                "  Redução de ruído: ${c.get(CameraCharacteristics.NOISE_REDUCTION_AVAILABLE_NOISE_REDUCTION_MODES)?.joinToString()} • " +
+                    "nitidez: ${c.get(CameraCharacteristics.EDGE_AVAILABLE_EDGE_MODES)?.joinToString()} • " +
+                    "pixel quente: ${c.get(CameraCharacteristics.HOT_PIXEL_AVAILABLE_HOT_PIXEL_MODES)?.joinToString()}",
+            )
             out.appendLine("  Modos de foco: ${c.get(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES)?.joinToString()} • exposição ${c.get(CameraCharacteristics.CONTROL_AE_COMPENSATION_RANGE)}")
             c.get(CameraCharacteristics.SENSOR_INFO_SENSITIVITY_RANGE)?.let { out.appendLine("  ISO: $it • tempo de exposição (ns): ${c.get(CameraCharacteristics.SENSOR_INFO_EXPOSURE_TIME_RANGE)}") }
+            val manual = CameraCaps.manual(c)
+            out.appendLine(
+                "  Modo Pro: ISO/obturador ${if (manual.iso != null) "sim" else "não"} • foco manual " +
+                    (if (manual.focusDiopters > 0f) "até ${manual.focusDiopters} dioptrias${if (manual.focusCalibrated) "" else " (sem calibração)"}" else "não") +
+                    " • Kelvin ${if (manual.kelvin) "sim" else "não"} (iluminantes ${c.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT1)}/" +
+                    "${c.get(CameraCharacteristics.SENSOR_REFERENCE_ILLUMINANT2)})",
+            )
             val map = c.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: continue
             val sizes = map.getOutputSizes(SurfaceTexture::class.java)?.sortedByDescending { it.width * it.height } ?: emptyList()
             out.appendLine("  Saídas 16:9 (fps máx):")

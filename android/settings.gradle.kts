@@ -13,5 +13,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "GodoiCan"
+rootProject.name = "GodoiCam"
 include(":app")

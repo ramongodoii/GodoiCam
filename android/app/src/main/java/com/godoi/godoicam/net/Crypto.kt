@@ -1,4 +1,4 @@
-package com.godoi.godoican.net
+package com.godoi.godoicam.net
 
 import java.math.BigInteger
 import java.nio.ByteBuffer

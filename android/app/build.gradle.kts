@@ -1,25 +1,45 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
 
+val keystoreProps = Properties()
+val keystorePropsFile = rootProject.file("keystore.properties")
+if (keystorePropsFile.exists()) keystorePropsFile.inputStream().use { keystoreProps.load(it) }
+
 android {
-    namespace = "com.godoi.godoican"
+    namespace = "com.godoi.godoicam"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.godoi.godoican"
+        applicationId = "com.godoi.godoicam"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
-        versionName = "1.0"
+        versionName = "0.1.0"
+    }
+
+    buildFeatures {
+        buildConfig = true
+    }
+
+    if (keystoreProps.getProperty("storeFile") != null) {
+        signingConfigs {
+            create("release") {
+                storeFile = rootProject.file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
-            // Uso pessoal: o APK de release é assinado com a chave de debug local.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
 

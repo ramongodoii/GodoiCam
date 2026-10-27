@@ -1,4 +1,4 @@
-package com.godoi.godoican.media
+package com.godoi.godoicam.media
 
 import android.opengl.EGL14
 import android.opengl.EGLConfig

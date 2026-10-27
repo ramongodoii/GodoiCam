@@ -41,7 +41,7 @@ STDAPI DllRegisterServer() {
     if (!GetModuleFileNameW(g_module, path, MAX_PATH)) return HRESULT_FROM_WIN32(GetLastError());
     HKEY clsid = nullptr, inproc = nullptr;
     LSTATUS st = RegCreateKeyExW(HKEY_LOCAL_MACHINE, kKey, 0, nullptr, 0, KEY_WRITE, nullptr, &clsid, nullptr);
-    if (st == ERROR_SUCCESS) st = SetString(clsid, nullptr, L"GodoiCan Virtual Camera");
+    if (st == ERROR_SUCCESS) st = SetString(clsid, nullptr, L"GodoiCam Virtual Camera");
     if (st == ERROR_SUCCESS)
         st = RegCreateKeyExW(clsid, L"InprocServer32", 0, nullptr, 0, KEY_WRITE, nullptr, &inproc, nullptr);
     if (st == ERROR_SUCCESS) st = SetString(inproc, nullptr, path);

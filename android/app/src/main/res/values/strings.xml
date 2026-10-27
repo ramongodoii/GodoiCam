@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">GodoiCan</string>
+    <string name="app_name">GodoiCam</string>
     <string name="switch_camera">Trocar câmera</string>
     <string name="torch">Lanterna</string>
     <string name="settings">Ajustes</string>
     <string name="curtain">Tela preta</string>
-    <string name="power_off">Desligar o GodoiCan</string>
-    <string name="power_on">Ligar o GodoiCan</string>
+    <string name="power_off">Desligar o GodoiCam</string>
+    <string name="power_on">Ligar o GodoiCam</string>
     <string name="close">Fechar</string>
     <string name="pair_title">Código de pareamento</string>
     <string name="section_video">Vídeo</string>
@@ -26,8 +26,15 @@
     <string name="stabilization">Estabilização digital (aumenta o atraso)</string>
     <string name="low_light">Priorizar pouca luz (o FPS pode cair)</string>
     <string name="auto_focus">Voltar ao foco automático</string>
+    <string name="section_pro">Modo Pro</string>
+    <string name="iso_manual">ISO manual</string>
+    <string name="shutter_manual">Obturador manual</string>
+    <string name="focus_manual">Foco manual</string>
+    <string name="kelvin_manual">Temperatura de cor manual</string>
+    <string name="all_auto">Tudo automático</string>
     <string name="section_diagnostics">Diagnóstico</string>
     <string name="share_report">Compartilhar relatório do aparelho</string>
+    <string name="about_fmt">GodoiCam %1$s — gratuito, sem telemetria. Licença MIT.</string>
     <string name="forget_pcs">Esquecer todos os PCs</string>
     <string name="tips">Toque na imagem para focar e duas vezes para voltar ao automático. Dois dedos para zoom. A área clara da prévia é o que vai para o PC; toque no selo do topo para ver detalhes.</string>
     <string name="curtain_hint">Toque duas vezes para voltar</string>

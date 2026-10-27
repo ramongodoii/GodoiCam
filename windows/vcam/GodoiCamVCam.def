@@ -1,4 +1,4 @@
-LIBRARY GodoiCanVCam
+LIBRARY GodoiCamVCam
 EXPORTS
     DllGetClassObject PRIVATE
     DllCanUnloadNow PRIVATE

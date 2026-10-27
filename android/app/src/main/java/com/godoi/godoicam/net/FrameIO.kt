@@ -1,4 +1,4 @@
-package com.godoi.godoican.net
+package com.godoi.godoicam.net
 
 import java.io.BufferedInputStream
 import java.io.DataInputStream

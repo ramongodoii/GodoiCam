@@ -2,15 +2,17 @@
 
 #include <windows.h>
 #include <mfapi.h>
+#include <setupapi.h>
 #include <mfvirtualcamera.h>
 #include <shellapi.h>
 #include <shlobj.h>
 #include <wrl/client.h>
 
-#include "GodoiCanShared.h"
+#include "GodoiCamShared.h"
 #include "Net.h"
 
 #pragma comment(lib, "mfsensorgroup.lib")
+#pragma comment(lib, "setupapi.lib")
 
 using Microsoft::WRL::ComPtr;
 
@@ -43,9 +45,9 @@ bool VCamDllRegistered() {
 }
 
 bool RegisterVCamDllElevated(std::wstring& error) {
-    std::wstring dll = ExeDir() + L"\\GodoiCanVCam.dll";
+    std::wstring dll = ExeDir() + L"\\GodoiCamVCam.dll";
     if (GetFileAttributesW(dll.c_str()) == INVALID_FILE_ATTRIBUTES) {
-        error = L"GodoiCanVCam.dll não está ao lado do GodoiCan.exe.";
+        error = L"GodoiCamVCam.dll não está ao lado do GodoiCam.exe.";
         return false;
     }
     std::wstring args = L"/s \"" + dll + L"\"";
@@ -161,7 +163,7 @@ static bool RunCapture(const std::wstring& exe, const std::wstring& args, std::s
 bool AdbForward(std::wstring& error) {
     std::wstring adb = FindAdb();
     if (adb.empty()) {
-        error = L"adb.exe não encontrado. Coloque a pasta platform-tools em \"adb\" ao lado do GodoiCan.exe.";
+        error = L"adb.exe não encontrado. Coloque a pasta platform-tools em \"adb\" ao lado do GodoiCam.exe.";
         return false;
     }
     std::string output;
@@ -182,20 +184,59 @@ bool AdbForward(std::wstring& error) {
     return false;
 }
 
-bool AdbDevicePresent() {
-    static std::wstring adb = FindAdb();
-    if (adb.empty()) return false;
-    std::string output;
-    DWORD code = 1;
-    if (!RunCapture(adb, L"devices", output, code, 5000) || code != 0) return false;
-    // Linhas "serial<TAB>device"; ignora "unauthorized" e "offline".
+// Há uma linha "serial<TAB>estado" com este estado no `adb devices`?
+static bool AdbHasState(const std::string& output, const char* state) {
+    std::string tag = std::string("\t") + state;
     size_t pos = 0;
-    while ((pos = output.find("\tdevice", pos)) != std::string::npos) {
-        size_t end = pos + 7;
+    while ((pos = output.find(tag, pos)) != std::string::npos) {
+        size_t end = pos + tag.size();
         if (end >= output.size() || output[end] == '\r' || output[end] == '\n') return true;
         pos = end;
     }
     return false;
+}
+
+static bool AdbDevices(std::string& output) {
+    static std::wstring adb = FindAdb();
+    if (adb.empty()) return false;
+    DWORD code = 1;
+    return RunCapture(adb, L"devices", output, code, 5000) && code == 0;
+}
+
+bool AdbDevicePresent() {
+    std::string output;
+    return AdbDevices(output) && AdbHasState(output, "device");
+}
+
+// Primeiro aparelho portátil (MTP: celular, câmera) ligado por USB; vazio se nenhum.
+static bool UsbPortableDevice(std::wstring& name) {
+    // GUID_DEVCLASS_WPD (devguid.h), sem initguid.h para não redefinir os GUIDs do Media Foundation.
+    static const GUID kWpdClass = {0xeec5ad98, 0x8080, 0x425f, {0x92, 0x2a, 0xda, 0xbf, 0x3d, 0xe3, 0xf6, 0x9a}};
+    HDEVINFO set = SetupDiGetClassDevsW(&kWpdClass, L"USB", nullptr, DIGCF_PRESENT);
+    if (set == INVALID_HANDLE_VALUE) return false;
+    SP_DEVINFO_DATA info{sizeof(info)};
+    bool found = SetupDiEnumDeviceInfo(set, 0, &info) != FALSE;
+    if (found) {
+        wchar_t buf[256] = {};
+        if (SetupDiGetDeviceRegistryPropertyW(set, &info, SPDRP_FRIENDLYNAME, nullptr, (BYTE*)buf, sizeof(buf) - 2,
+                                              nullptr))
+            name = buf;
+    }
+    SetupDiDestroyDeviceInfoList(set);
+    return found;
+}
+
+UsbPhone UsbPhoneState(std::wstring& name) {
+    name.clear();
+    std::string output;
+    bool adb = AdbDevices(output);
+    if (adb && AdbHasState(output, "device")) return UsbPhone::Ready;
+    if (adb && (AdbHasState(output, "unauthorized") || AdbHasState(output, "offline"))) {
+        UsbPortableDevice(name);
+        return UsbPhone::Unauthorized;
+    }
+    if (!UsbPortableDevice(name)) return UsbPhone::None;
+    return FindAdb().empty() ? UsbPhone::NoAdb : UsbPhone::NoDebugging;
 }
 
 static const wchar_t kRunKey[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
@@ -203,7 +244,7 @@ static const wchar_t kRunKey[] = L"Software\\Microsoft\\Windows\\CurrentVersion\
 bool StartWithWindows() {
     HKEY key;
     if (RegOpenKeyExW(HKEY_CURRENT_USER, kRunKey, 0, KEY_READ, &key) != ERROR_SUCCESS) return false;
-    bool on = RegQueryValueExW(key, L"GodoiCan", nullptr, nullptr, nullptr, nullptr) == ERROR_SUCCESS;
+    bool on = RegQueryValueExW(key, L"GodoiCam", nullptr, nullptr, nullptr, nullptr) == ERROR_SUCCESS;
     RegCloseKey(key);
     return on;
 }
@@ -215,10 +256,10 @@ void SetStartWithWindows(bool on) {
         wchar_t path[MAX_PATH];
         GetModuleFileNameW(nullptr, path, MAX_PATH);
         std::wstring value = L"\"" + std::wstring(path) + L"\" --minimized";
-        RegSetValueExW(key, L"GodoiCan", 0, REG_SZ, (const BYTE*)value.c_str(),
+        RegSetValueExW(key, L"GodoiCam", 0, REG_SZ, (const BYTE*)value.c_str(),
                        (DWORD)((value.size() + 1) * sizeof(wchar_t)));
     } else {
-        RegDeleteValueW(key, L"GodoiCan");
+        RegDeleteValueW(key, L"GodoiCam");
     }
     RegCloseKey(key);
 }
