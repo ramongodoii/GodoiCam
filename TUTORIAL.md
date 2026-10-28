@@ -63,6 +63,6 @@ O PC precisa do `adb` (Android Studio ou pasta `adb\adb.exe` ao lado do GodoiCam
 | Código não aparece | Deixe o GodoiCam **na tela** do celular (não só em segundo plano). |
 | “Código incorreto” | O celular gera outro; use o novo. |
 | USB não pega | Depuração USB ligada? Permissão “Permitir” aceita? Bloqueador automático do Samsung desligado? |
-| GodoiCam não aparece no Zoom/Teams | Rode `instalar.cmd` de novo, ☰ → Reinstalar câmera virtual, reabra o app de vídeo. |
+| GodoiCam não aparece no Zoom/Teams | Rode o Setup de novo (ou `instalar.cmd`), ☰ → Reinstalar câmera virtual, reabra o app de vídeo. |
 | Imagem de lado | Ajustes do celular → Correção de rotação, ou desligue “Girar com o celular”. |
 | Imagem travando no Wi‑Fi | Ajustes → Qualidade → Normal, ou use o cabo. |

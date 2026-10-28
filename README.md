@@ -9,7 +9,7 @@ celular  →  H.264  →  Wi‑Fi ou USB (AES‑256‑GCM)  →  PC  →  câmer
                                                               Zoom, Teams, Meet, OBS, Discord…
 ```
 
-**Versão atual: 0.1.0.** Código e instaladores: [github.com/ramongodoii/GodoiCam](https://github.com/ramongodoii/GodoiCam). O mapa do que ainda falta (áudio, Play Store…) está em [`docs/LANCAMENTO.md`](docs/LANCAMENTO.md).
+**Versão atual: 0.1.0.** Baixe o APK e o instalador do PC na [Release](https://github.com/ramongodoii/GodoiCam/releases/latest).
 
 ## O que precisa
 
@@ -23,7 +23,10 @@ celular  →  H.264  →  Wi‑Fi ou USB (AES‑256‑GCM)  →  PC  →  câmer
 
 ## Instalar
 
-Baixe a [Release mais recente](https://github.com/ramongodoii/GodoiCam/releases): o APK do celular e o ZIP do Windows.
+Baixe a [Release mais recente](https://github.com/ramongodoii/GodoiCam/releases/latest):
+
+- Celular: `GodoiCam-0.1.0.apk`
+- PC: `GodoiCam-0.1.0-Setup.exe`
 
 ### Celular
 
@@ -42,7 +45,7 @@ Quem for compilar: o APK sai em `android/app/build/outputs/apk/release/app-relea
 
 O instalador copia o app para `C:\Program Files\GodoiCam`, registra a câmera virtual, libera o firewall e cria o atalho no menu Iniciar. Nas próximas vezes, abra **GodoiCam** pelo menu Iniciar.
 
-Para remover: `windows\desinstalar.cmd`.
+Para remover: **Configurações → Aplicativos → GodoiCam → Desinstalar**. Quem usou o ZIP: `windows\desinstalar.cmd`.
 
 **USB:** o PC precisa do `adb`. Se você tem o Android Studio, ele já encontra o SDK. Senão, baixe as [platform-tools](https://developer.android.com/tools/releases/platform-tools) e coloque a pasta como `adb` ao lado do `GodoiCam.exe` (fica `adb\adb.exe`). Não redistribuímos o `adb` da Google neste repositório.
 
@@ -119,7 +122,7 @@ Gera `windows\bin\GodoiCam.exe` e `windows\bin\GodoiCamVCam.dll`. O instalador �
 | `windows/vcam/` | Câmera virtual (DLL do Frame Server) |
 | `windows/app/` | GodoiCam.exe |
 | `windows/common/` | Memória compartilhada entre exe e DLL |
-| `docs/` | Protocolo, medições, roteiro, [lançamento](docs/LANCAMENTO.md) |
+| `docs/` | Protocolo, medições e notas de desenvolvimento |
 
 ## Licença
 
