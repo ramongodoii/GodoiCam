@@ -8,4 +8,5 @@ Primeira versão com nome **GodoiCam**, pensada para uso grátis e código abert
 - Câmera virtual para Zoom, Teams, Meet, OBS, Discord
 - Pareamento com código, sessão cifrada, reconexão sozinha
 - Modo Pro no celular e controle pelo PC
-- Sem áudio, sem Play Store, sem instalador MSI nesta tag
+- Sem áudio e sem Play Store nesta tag
+- Instalador único `GodoiCam-Setup.exe` (Inno Setup; `windows/godoicam.iss`)

@@ -36,9 +36,9 @@ Quem for compilar: o APK sai em `android/app/build/outputs/apk/release/app-relea
 
 ### PC
 
-1. Extraia `GodoiCam-0.1.0-windows.zip`.
-2. Dê dois cliques em `instalar.cmd` e aceite o pedido de administrador (só nesta vez).
-3. Se o SmartScreen bloquear, use **Mais informações → Executar assim mesmo**.
+1. Baixe `GodoiCam-Setup.exe` na [Release](https://github.com/ramongodoii/GodoiCam/releases) e execute. Aceite o administrador (só nesta vez).
+2. Se o SmartScreen bloquear, use **Mais informações → Executar assim mesmo**.
+3. Quem preferir o ZIP antigo: extraia e rode `instalar.cmd` (mesmo efeito).
 
 O instalador copia o app para `C:\Program Files\GodoiCam`, registra a câmera virtual, libera o firewall e cria o atalho no menu Iniciar. Nas próximas vezes, abra **GodoiCam** pelo menu Iniciar.
 
@@ -109,7 +109,7 @@ Para um APK de distribuição (sempre o mesmo “app” no celular), crie `andro
 windows\build.cmd
 ```
 
-Gera `windows\bin\GodoiCam.exe` e `windows\bin\GodoiCamVCam.dll`. Depois rode `windows\instalar.cmd`.
+Gera `windows\bin\GodoiCam.exe` e `windows\bin\GodoiCamVCam.dll`. O instalador único (`GodoiCam-Setup.exe`) sai com `windows\build-setup.cmd` (precisa do [Inno Setup 6](https://jrsoftware.org/isinfo.php)). Quem não for gerar o Setup pode continuar com `windows\instalar.cmd`.
 
 ## Estrutura do repositório
 

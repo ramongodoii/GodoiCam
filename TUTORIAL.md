@@ -4,7 +4,7 @@ São duas partes: o app no **celular** e o app no **PC**. Os dois precisam estar
 
 ## Primeira vez no PC
 
-1. Rode `instalar.cmd` (na pasta `windows` do projeto, ou na pasta da Release) e aceite o administrador.
+1. Rode `GodoiCam-Setup.exe` da [Release](https://github.com/ramongodoii/GodoiCam/releases) (ou `instalar.cmd` se você compilou). Aceite o administrador.
 2. O GodoiCam do PC abre sozinho. Depois, abra pelo menu Iniciar: **GodoiCam**.
 3. Se o Windows disser que o aplicativo não é reconhecido: **Mais informações → Executar assim mesmo**.
 

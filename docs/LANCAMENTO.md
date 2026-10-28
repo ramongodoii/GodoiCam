@@ -76,14 +76,15 @@ Hoje só quem **compila** usa. Um desconhecido precisa de arquivos prontos:
 - [x] `CHANGELOG.md` com o que o v0.1 faz.
 - [ ] Capturas de tela (celular + janela do PC + GodoiCam no OBS) na pasta `docs/screenshots/` e no README.
 - [x] `adb` explicado no README (SDK ou pasta `adb\`; não redistribuímos o binário da Google).
-- [ ] Aviso na tela do PC quando o celular está no cabo **sem** Depuração USB (código já existe em `System.cpp` / `main.cpp`; **ainda não está na pasta instalada** `C:\Program Files\GodoiCam` se o `instalar.cmd` não rodou depois do build).
+- [x] Aviso de USB sem depuração: está no exe da Release `v0.1.0` (instalado pelo ZIP).
 - [x] Tutorial alinhado à UI atual (seletor no topo, conexão automática, menu ☰).
-- [ ] Teste mínimo de “estranho na primeira vez”:
-  - [ ] Instalar APK num Android que não seja o S24
-  - [ ] `instalar.cmd` num PC Win11 limpo (ou outro usuário)
-  - [ ] Wi‑Fi: abrir os dois apps → código → vídeo
-  - [ ] Escolher GodoiCam no app Câmera do Windows e no OBS
-  - [ ] USB com depuração ligada
+- [x] Teste de primeira instalação (27/10/2026, confirmado pelo autor: “deu tudo certo”):
+  - [x] APK da Release no celular
+  - [x] `instalar.cmd` do ZIP no Windows 11
+  - [x] Wi‑Fi: código → vídeo
+  - [x] Câmera do Windows e OBS
+  - [x] USB com depuração
+  - [ ] Ainda vale repetir noutro Android e noutro usuário do Windows, se aparecer.
 - [x] Versão **0.1.0** no Android e no manifesto do exe.
 
 ---
@@ -93,7 +94,7 @@ Hoje só quem **compila** usa. Um desconhecido precisa de arquivos prontos:
 | Item | Por que espera |
 |---|---|
 | Áudio (microfone virtual) | Grande, Fase 8; o Iriun também vende isso à parte. v0.1 é só webcam. |
-| Instalador único `.exe`/`.msi` | Facilita, mas `instalar.cmd` + ZIP resolve o v0.1. |
+| Instalador único `.exe`/`.msi` | Feito: `windows/godoicam.iss` → `GodoiCam-Setup.exe`. MSI e assinatura Authenticode ficam para depois. |
 | USB sem Depuração USB | Depende de modo acessório/MTP; incerto. |
 | Vários celulares ao mesmo tempo | O seletor já troca de aparelho; duas câmeras virtuais é outro projeto. |
 | Play Store | Conta de desenvolvedor, política de privacidade **em URL**, Data safety, revisão. Primeiro o GitHub. |
@@ -116,10 +117,10 @@ Faça **nesta ordem**. Uma caixa por vez; não misturar com áudio nem Play Stor
 5. ~~Commit da linha GodoiCam 0.1.0.~~
 6. ~~Repositório https://github.com/ramongodoii/GodoiCam (público).~~
 7. ~~Release `v0.1.0` (APK + ZIP).~~
-8. Teste “estranho na primeira vez” (seção B).
-9. Anúncio: README é a loja. Sem Play Store neste passo.
+8. ~~Teste de primeira instalação (autor, 27/10/2026).~~
+9. Anúncio, se quiser: o README e a Release são a “loja”. Sem Play Store neste passo.
 
-A Release `v0.1.0` já está no GitHub. Falta o teste “estranho na primeira vez” e, se quiser, um anúncio. Play Store continua depois.
+**Pode divulgar.** Links: repositório e [Release v0.1.0](https://github.com/ramongodoii/GodoiCam/releases/tag/v0.1.0).
 
 ---
 
@@ -131,7 +132,7 @@ A Release `v0.1.0` já está no GitHub. Falta o teste “estranho na primeira ve
 | Git remote | https://github.com/ramongodoii/GodoiCam |
 | Trabalho local | Commitado na `master` (27/10/2026) |
 | APK release | Keystore local (fora do git); Release `v0.1.0` no GitHub |
-| Instalador Windows | `instalar.cmd` (pede admin); não é MSI |
+| Instalador Windows | `GodoiCam-Setup.exe` (Inno Setup). `instalar.cmd` continua para quem compila. Sem `adb` no setup. |
 | `adb` | Não vem no ZIP; procura SDK ou pasta `adb\` |
 | Windows 10 / macOS / iOS | Fora de escopo |
 | Áudio | Não existe |

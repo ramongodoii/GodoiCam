@@ -34,3 +34,4 @@ cl %CFLAGS% app\*.cpp obj\app\app.res /Fo"obj\app\\" /Fe"bin\GodoiCam.exe" ^
    user32.lib gdi32.lib advapi32.lib || exit /b 1
 
 echo OK: %CD%\bin
+echo Para o instalador unico: build-setup.cmd (precisa do Inno Setup 6).
