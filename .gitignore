@@ -1,6 +1,9 @@
 windows/bin/
 windows/obj/
 dist/
+docs/LANCAMENTO.md
+docs/MEDICOES.md
+docs/ROADMAP.md
 GodoiCam.apk
 *.apk
 *.jks

@@ -7,8 +7,8 @@
 AppId={{A7E31C4B-9D2F-4E18-8B70-6C1A0F3D5E92}
 AppName=GodoiCam
 AppVersion={#AppVersion}
-AppPublisher=Ramon Godoi
-AppPublisherURL=https://github.com/ramongodoii/GodoiCam
+AppPublisher=ramongodoii
+AppPublisherURL=https://ramongodoi.com
 AppSupportURL=https://github.com/ramongodoii/GodoiCam/issues
 DefaultDirName={autopf}\GodoiCam
 DefaultGroupName=GodoiCam

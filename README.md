@@ -122,8 +122,8 @@ Gera `windows\bin\GodoiCam.exe` e `windows\bin\GodoiCamVCam.dll`. O instalador �
 | `windows/vcam/` | Câmera virtual (DLL do Frame Server) |
 | `windows/app/` | GodoiCam.exe |
 | `windows/common/` | Memória compartilhada entre exe e DLL |
-| `docs/` | Protocolo, medições e notas de desenvolvimento |
+| `docs/` | Protocolo da sessão (para quem for contribuir) |
 
 ## Licença
 
-[MIT](LICENSE). Copyright (c) 2026 Ramon Godoi.
+[MIT](LICENSE). [@ramongodoii](https://github.com/ramongodoii) · [ramongodoi.com](https://ramongodoi.com)

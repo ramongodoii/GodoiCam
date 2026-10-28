@@ -726,7 +726,8 @@ void OnMenu(int id) {
                         L"GodoiCam 0.1.0\n"
                         L"Celular Android como webcam do Windows 11.\n"
                         L"Gratuito, sem anúncios e sem telemetria.\n"
-                        L"Licença MIT. O vídeo fica na sua rede; não vai para a nuvem.",
+                        L"Licença MIT. @ramongodoii · ramongodoi.com\n"
+                        L"O vídeo fica na sua rede; não vai para a nuvem.",
                         L"Sobre o GodoiCam", MB_OK | MB_ICONINFORMATION);
             break;
         case IDM_EXIT:

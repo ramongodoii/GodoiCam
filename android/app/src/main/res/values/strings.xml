@@ -34,7 +34,7 @@
     <string name="all_auto">Tudo automático</string>
     <string name="section_diagnostics">Diagnóstico</string>
     <string name="share_report">Compartilhar relatório do aparelho</string>
-    <string name="about_fmt">GodoiCam %1$s — gratuito, sem telemetria. Licença MIT.</string>
+    <string name="about_fmt">GodoiCam %1$s — @ramongodoii · ramongodoi.com · MIT. Gratuito, sem telemetria.</string>
     <string name="forget_pcs">Esquecer todos os PCs</string>
     <string name="tips">Toque na imagem para focar e duas vezes para voltar ao automático. Dois dedos para zoom. A área clara da prévia é o que vai para o PC; toque no selo do topo para ver detalhes.</string>
     <string name="curtain_hint">Toque duas vezes para voltar</string>
